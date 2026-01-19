@@ -1,10 +1,79 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
+interface Lead {
+    id: string;
+    name: string;
+    linkedin_url: string;
+    title?: string;
+    company?: string;
+    email?: string;
+    score: number;
+    status: string;
+    source: string;
+    enrichment_status: string;
+    created_at: string;
+}
+
+interface LeadsResponse {
+    leads: Lead[];
+    total: number;
+}
+
+interface LeadStats {
+    total: number;
+    by_status: Record<string, number>;
+    by_source: Record<string, number>;
+    by_enrichment: Record<string, number>;
+    avg_score: number;
+}
 
 export default function ScoringPage() {
     const [activeTab, setActiveTab] = useState("All Leads");
+    const [leads, setLeads] = useState<Lead[]>([]);
+    const [stats, setStats] = useState<LeadStats | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+    useEffect(() => {
+        async function fetchData() {
+            setIsLoading(true);
+
+            // Fetch leads
+            const leadsRes = await api.get<LeadsResponse>("/api/leads?limit=20");
+            if (!leadsRes.error && leadsRes.data) {
+                setLeads(leadsRes.data.leads || []);
+                if (leadsRes.data.leads?.length > 0) {
+                    setSelectedLead(leadsRes.data.leads[0]);
+                }
+            }
+
+            // Fetch stats
+            const statsRes = await api.get<LeadStats>("/api/leads/stats");
+            if (!statsRes.error && statsRes.data) {
+                setStats(statsRes.data);
+            }
+
+            setIsLoading(false);
+        }
+
+        fetchData();
+    }, []);
+
+    // Filter leads based on tab
+    const filteredLeads = leads.filter(lead => {
+        if (activeTab === "Qualified (80+)") return lead.score >= 80;
+        if (activeTab === "Needs Review") return lead.score >= 40 && lead.score < 80;
+        return true;
+    });
+
+    const qualifiedCount = leads.filter(l => l.score >= 80).length;
+    const reviewCount = leads.filter(l => l.score >= 40 && l.score < 80).length;
+    const disqualifiedCount = leads.filter(l => l.score < 40).length;
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-muted-foreground transition-colors duration-300">
@@ -41,30 +110,30 @@ export default function ScoringPage() {
                     <div className="mb-8 grid grid-cols-4 gap-4">
                         <StatCard
                             label="Average Score"
-                            value="72"
-                            trend="+5%"
+                            value={isLoading ? "..." : String(Math.round(stats?.avg_score || 0))}
+                            trend={`${leads.length} leads`}
                             trendUp={true}
                             icon={<ChartIcon />}
                         />
                         <StatCard
                             label="Qualified Today"
-                            value="14"
-                            trend="+12%"
+                            value={isLoading ? "..." : String(qualifiedCount)}
+                            trend="Score 80+"
                             trendUp={true}
                             icon={<CheckCircleIcon />}
                         />
                         <StatCard
                             label="Pending Analysis"
-                            value="34"
-                            trend="-2%"
+                            value={isLoading ? "..." : String(reviewCount)}
+                            trend="Score 40-79"
                             trendUp={false}
                             icon={<GlassIcon />}
                         />
                         <StatCard
                             label="Disqualified"
-                            value="8"
-                            trend="1%"
-                            trendUp={true} // Technically up, but simplified for UI
+                            value={isLoading ? "..." : String(disqualifiedCount)}
+                            trend="Score < 40"
+                            trendUp={true}
                             icon={<BanIcon />}
                         />
                     </div>
@@ -89,7 +158,7 @@ export default function ScoringPage() {
                         </div>
 
                         {activeTab === "Lists" ? (
-                            <ListsView />
+                            <ListsView leads={leads} isLoading={isLoading} />
                         ) : (
                             <div className="overflow-hidden rounded-xl border border-border bg-card transition-colors duration-300">
                                 {/* Table Header */}
@@ -103,38 +172,42 @@ export default function ScoringPage() {
 
                                 {/* Table Rows */}
                                 <div className="divide-y divide-border">
-                                    <LeadRow
-                                        name="Sarah Jenkins"
-                                        role="VP of Engineering"
-                                        company="TechFlow Inc."
-                                        score={94}
-                                        status="Qualified"
-                                        avatarInitials="SJ"
-                                        avatarColor="bg-amber-500/20 text-amber-500"
-                                    />
-                                    <LeadRow
-                                        name="Michael Chen"
-                                        role="Head of Product"
-                                        company="StripeSoft"
-                                        score={68}
-                                        status="Review"
-                                        avatarInitials="MC"
-                                        avatarColor="bg-cyan-500/20 text-cyan-500"
-                                    />
-                                    <LeadRow
-                                        name="Elena Rodriguez"
-                                        role="CTO"
-                                        company="Nexus AI"
-                                        score={42}
-                                        status="Disqualified"
-                                        avatarInitials="ER"
-                                        avatarColor="bg-rose-500/20 text-rose-500"
-                                    />
+                                    {isLoading ? (
+                                        <div className="flex items-center justify-center py-12">
+                                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                                        </div>
+                                    ) : filteredLeads.length === 0 ? (
+                                        <div className="py-12 text-center text-muted-foreground">
+                                            No leads found. Start extracting leads!
+                                        </div>
+                                    ) : (
+                                        filteredLeads.slice(0, 10).map((lead) => {
+                                            const initials = lead.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+                                            const avatarColor = lead.score >= 80 ? "bg-amber-500/20 text-amber-500" :
+                                                lead.score >= 40 ? "bg-cyan-500/20 text-cyan-500" :
+                                                    "bg-rose-500/20 text-rose-500";
+                                            const status = lead.score >= 80 ? "Qualified" :
+                                                lead.score >= 40 ? "Review" : "Disqualified";
+                                            return (
+                                                <div key={lead.id} onClick={() => setSelectedLead(lead)} className="cursor-pointer">
+                                                    <LeadRow
+                                                        name={lead.name}
+                                                        role={lead.title || "No title"}
+                                                        company={lead.company || "Unknown"}
+                                                        score={lead.score}
+                                                        status={status}
+                                                        avatarInitials={initials}
+                                                        avatarColor={avatarColor}
+                                                    />
+                                                </div>
+                                            );
+                                        })
+                                    )}
                                 </div>
 
                                 {/* Pagination Footer */}
                                 <div className="flex items-center justify-between px-6 py-4 text-xs text-muted-foreground border-t border-border">
-                                    <span>Showing 3 of 128 leads</span>
+                                    <span>Showing {Math.min(filteredLeads.length, 10)} of {filteredLeads.length} leads</span>
                                     <div className="flex gap-4">
                                         <button className="hover:text-foreground transition">Previous</button>
                                         <button className="hover:text-foreground transition">Next</button>
@@ -221,7 +294,7 @@ export default function ScoringPage() {
 }
 
 /* --- Lists View Component --- */
-function ListsView() {
+function ListsView({ leads, isLoading }: { leads: Lead[]; isLoading: boolean }) {
     return (
         <div className="overflow-hidden rounded-xl border border-border bg-card transition-colors duration-300">
             {/* Header */}
@@ -230,75 +303,40 @@ function ListsView() {
                 <div>Name</div>
                 <div>Job</div>
                 <div>Company</div>
-                <div>Activity</div>
+                <div>Score</div>
                 <div className="text-right">Status</div>
             </div>
 
             {/* List Items */}
             <div className="divide-y divide-border">
-                <ListItem
-                    name="Tommi Martikainen"
-                    role="Founder and CEO"
-                    avatarColor="bg-blue-600"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
-                <ListItem
-                    name="Sayari De"
-                    role="Director"
-                    company="Madhya Design"
-                    avatarImg="https://i.pravatar.cc/150?u=sayari"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
-                <ListItem
-                    name="Swaraj Ruparel"
-                    role="Business Development Intern"
-                    avatarColor="bg-blue-600"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
-                <ListItem
-                    name="Jasmine Amaso"
-                    role="CEO, General Partner"
-                    company="JLL - Project Executive of ..."
-                    avatarImg="https://i.pravatar.cc/150?u=jasmine"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
-                <ListItem
-                    name="Marlon Schwarcz"
-                    role="Chief Investment Officer"
-                    avatarColor="bg-blue-600"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
-                <ListItem
-                    name="sanjana Nagendran"
-                    role="Incubation"
-                    avatarColor="bg-blue-600"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
-                <ListItem
-                    name="Rashed M. Al Wazzan"
-                    role="Managing Director"
-                    company="Cove Real Estates"
-                    avatarImg="https://i.pravatar.cc/150?u=rashed"
-                    hasLinkedin
-                    hasMessage
-                    hasEmail
-                />
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                ) : leads.length === 0 ? (
+                    <div className="py-12 text-center text-muted-foreground">
+                        No leads found.
+                    </div>
+                ) : (
+                    leads.slice(0, 10).map((lead) => (
+                        <ListItem
+                            key={lead.id}
+                            name={lead.name}
+                            role={lead.title || "No title"}
+                            company={lead.company || ""}
+                            score={lead.score}
+                            avatarColor={lead.score >= 80 ? "bg-emerald-600" : lead.score >= 40 ? "bg-blue-600" : "bg-rose-600"}
+                            hasLinkedin={!!lead.linkedin_url}
+                            hasEmail={!!lead.email}
+                        />
+                    ))
+                )}
             </div>
         </div>
     )
 }
+
+
 
 function ListItem({ name, role, company, avatarColor, avatarImg, hasLinkedin, hasMessage, hasEmail }: any) {
     return (

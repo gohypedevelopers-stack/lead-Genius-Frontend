@@ -1,12 +1,75 @@
 "use client";
 
 import Link from "next/link";
-import { Globe, FileSearch } from "lucide-react";
-import { useState } from "react";
+import { Globe, FileSearch, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
 import AddLeads from "./social-engagement/AddLeads";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+
+interface Lead {
+  id: string;
+  name: string;
+  linkedin_url: string;
+  title?: string;
+  company?: string;
+  email?: string;
+  score: number;
+  status: string;
+  source: string;
+  enrichment_status: string;
+  created_at: string;
+}
+
+interface LeadsResponse {
+  leads: Lead[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+interface LeadStats {
+  total: number;
+  by_status: Record<string, number>;
+  by_source: Record<string, number>;
+  by_enrichment: Record<string, number>;
+  avg_score: number;
+}
 
 export default function LeadExtractionPage() {
   const [showAddLeads, setShowAddLeads] = useState(false);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [stats, setStats] = useState<LeadStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+
+  // Fetch leads and stats
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true);
+
+      // Fetch leads
+      const leadsRes = await api.get<LeadsResponse>(`/api/leads?page=${page}&limit=10`);
+      if (!leadsRes.error && leadsRes.data) {
+        setLeads(leadsRes.data.leads || []);
+        setTotal(leadsRes.data.total || 0);
+      }
+
+      // Fetch stats
+      const statsRes = await api.get<LeadStats>("/api/leads/stats");
+      if (!statsRes.error && statsRes.data) {
+        setStats(statsRes.data);
+      }
+
+      setIsLoading(false);
+    }
+
+    fetchData();
+  }, [page]);
+
+  const enrichedCount = stats?.by_enrichment?.completed || 0;
+  const enrichmentRate = stats?.total ? Math.round((enrichedCount / stats.total) * 100) : 0;
 
   return (
     <div className="relative h-full w-full bg-background text-foreground transition-colors duration-300">
@@ -42,8 +105,8 @@ export default function LeadExtractionPage() {
         <div className="mt-6 grid gap-4 lg:grid-cols-3">
           <StatCard
             title="Total Leads Extracted"
-            value="12,405"
-            sub="+12% from last week"
+            value={isLoading ? "..." : (stats?.total?.toLocaleString() || "0")}
+            sub={`${stats?.by_source?.linkedin || 0} from LinkedIn`}
             subColor="text-emerald-500"
             iconRight={
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -75,7 +138,7 @@ export default function LeadExtractionPage() {
 
           <StatCardProgress
             title="Email Validity Rate"
-            value="85%"
+            value={isLoading ? "..." : `${enrichmentRate}%`}
             iconRight={
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                 <path
@@ -87,12 +150,12 @@ export default function LeadExtractionPage() {
                 />
               </svg>
             }
-            progress={85}
+            progress={enrichmentRate}
           />
 
           <StatCard
             title="Active Jobs"
-            value="4"
+            value={isLoading ? "..." : String(stats?.by_status?.new || 0)}
             sub="Processing now"
             subColor="text-emerald-400"
             iconRight={
@@ -177,15 +240,15 @@ export default function LeadExtractionPage() {
           </div>
         </div>
 
-        {/* Recent Activity */}
+        {/* Recent Activity - Now showing real leads */}
         <div className="mt-10">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
-              Recent Activity
+              Recent Leads
             </h2>
-            <button className="text-sm font-semibold text-blue-500 hover:text-blue-400">
+            <Link href="/dashboard/crm" className="text-sm font-semibold text-blue-500 hover:text-blue-400">
               View All
-            </button>
+            </Link>
           </div>
 
           <div className="mt-4 rounded-2xl border border-border bg-card p-4 transition-colors">
@@ -193,31 +256,52 @@ export default function LeadExtractionPage() {
               <table className="w-full text-left text-sm">
                 <thead className="text-xs text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th className="py-3">CAMPAIGN NAME</th>
-                    <th className="py-3">METHOD</th>
-                    <th className="py-3">DATE</th>
-                    <th className="py-3">LEADS FOUND</th>
+                    <th className="py-3">NAME</th>
+                    <th className="py-3">COMPANY</th>
+                    <th className="py-3">SOURCE</th>
+                    <th className="py-3">SCORE</th>
                     <th className="py-3">STATUS</th>
                   </tr>
                 </thead>
 
                 <tbody className="text-foreground/80">
-                  <Row
-                    name="Q4 SaaS Outreach"
-                    method="Web Engagement"
-                    date="Oct 24, 2023"
-                    leads="450"
-                    status="Completed"
-                    statusColor="green"
-                  />
-                  <Row
-                    name="Marketing Managers List"
-                    method="Groups Scraper"
-                    date="Oct 23, 2023"
-                    leads="1,200"
-                    status="Processing"
-                    statusColor="blue"
-                  />
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center">
+                        <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
+                      </td>
+                    </tr>
+                  ) : leads.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                        No leads found. Start extracting leads!
+                      </td>
+                    </tr>
+                  ) : (
+                    leads.slice(0, 5).map((lead) => (
+                      <tr key={lead.id} className="border-b border-border last:border-0">
+                        <td className="py-3">
+                          <div className="font-medium">{lead.name}</div>
+                          <div className="text-xs text-muted-foreground">{lead.title || "No title"}</div>
+                        </td>
+                        <td className="py-3">{lead.company || "-"}</td>
+                        <td className="py-3 capitalize">{lead.source}</td>
+                        <td className="py-3">
+                          <span className={`text-xs font-semibold ${lead.score >= 70 ? "text-emerald-500" : lead.score >= 40 ? "text-amber-500" : "text-red-400"}`}>
+                            {lead.score}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${lead.status === "qualified" ? "bg-emerald-500/10 text-emerald-500" :
+                              lead.status === "contacted" ? "bg-blue-500/10 text-blue-500" :
+                                "bg-gray-500/10 text-gray-400"
+                            }`}>
+                            {lead.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

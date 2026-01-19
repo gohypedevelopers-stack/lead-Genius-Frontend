@@ -1,91 +1,76 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { api } from "@/lib/api";
+import { Loader2 } from "lucide-react";
+
+interface Lead {
+    id: string;
+    name: string;
+    title?: string;
+    company?: string;
+    email?: string;
+    score: number;
+    status: string;
+    source: string;
+    created_at: string;
+}
+
+interface LeadsResponse {
+    leads: Lead[];
+    total: number;
+}
+
+interface LeadStats {
+    total: number;
+    by_status: Record<string, number>;
+    avg_score: number;
+}
 
 export default function CRMPage() {
-    // Lead Data
-    const leads = [
-        {
-            id: 1,
-            name: "Sarah Miller",
-            role: "VP Sales",
-            company: "TechFlow Inc.",
-            score: 92,
-            status: "Interested",
-            lastActive: "2h ago",
-            followUp: "Tomorrow",
-            tag: "SaaS",
-            tagColor: "purple",
-            remainder: "Send Contract",
-            initials: "SM",
-            avatarColor: "bg-blue-600",
-            selected: true
-        },
-        {
-            id: 2,
-            name: "John Doe",
-            role: "Head of Growth",
-            company: "Acme Corp",
-            score: 85,
-            status: "Interested",
-            lastActive: "5h ago",
-            followUp: "Wed, 2 PM",
-            tag: "Ent.",
-            tagColor: "blue",
-            remainder: "Demo Call",
-            initials: "JD",
-            avatarColor: "bg-purple-600",
-            selected: false
-        },
-        {
-            id: 3,
-            name: "David Lee",
-            role: "CTO",
-            company: "SoftSys",
-            score: 60,
-            status: "Follow-up",
-            lastActive: "1d ago",
-            followUp: "Nov 12",
-            tag: "Mid-Market",
-            tagColor: "slate",
-            remainder: "Check Email",
-            initials: "DL",
-            avatarColor: "bg-amber-600",
-            selected: false
-        },
-        {
-            id: 4,
-            name: "Emily Chen",
-            role: "Founder",
-            company: "Innovate",
-            score: 45,
-            status: "Closed Lost",
-            lastActive: "3d ago",
-            followUp: "-",
-            tag: "Startup",
-            tagColor: "rose",
-            remainder: "-",
-            initials: "EC",
-            avatarColor: "bg-slate-600",
-            selected: false
-        },
-        {
-            id: 5,
-            name: "Mike Jones",
-            role: "Director",
-            company: "BuildIt",
-            score: 98,
-            status: "Closed Won",
-            lastActive: "4d ago",
-            followUp: "-",
-            tag: "Cons.",
-            tagColor: "emerald",
-            remainder: "Onboarding",
-            initials: "MJ",
-            avatarColor: "bg-emerald-600",
-            selected: false
+    const [leads, setLeads] = useState<Lead[]>([]);
+    const [stats, setStats] = useState<LeadStats | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    const [activeFilter, setActiveFilter] = useState("All");
+
+    useEffect(() => {
+        async function fetchData() {
+            setIsLoading(true);
+
+            // Fetch leads
+            const leadsRes = await api.get<LeadsResponse>("/api/leads?limit=50");
+            if (!leadsRes.error && leadsRes.data) {
+                setLeads(leadsRes.data.leads || []);
+                if (leadsRes.data.leads?.length > 0) {
+                    setSelectedLead(leadsRes.data.leads[0]);
+                }
+            }
+
+            // Fetch stats
+            const statsRes = await api.get<LeadStats>("/api/leads/stats");
+            if (!statsRes.error && statsRes.data) {
+                setStats(statsRes.data);
+            }
+
+            setIsLoading(false);
         }
-    ];
+
+        fetchData();
+    }, []);
+
+    // Filter leads based on active filter
+    const filteredLeads = leads.filter(lead => {
+        if (activeFilter === "All") return true;
+        if (activeFilter === "qualified") return lead.score >= 80;
+        if (activeFilter === "Interested") return lead.status === "interested" || lead.score >= 60;
+        if (activeFilter === "Follow-up") return lead.status === "contacted";
+        return lead.status.toLowerCase() === activeFilter.toLowerCase();
+    });
+
+    // Calculate counts for tabs
+    const interestedCount = leads.filter(l => l.score >= 60).length;
+    const followUpCount = leads.filter(l => l.status === "contacted").length;
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-muted-foreground transition-colors duration-300">
@@ -126,18 +111,18 @@ export default function CRMPage() {
                     </div>
 
                     <div className="relative z-10">
-                        <h1 className="text-3xl font-bold text-white mb-6">Q3 Sales Pipeline</h1>
+                        <h1 className="text-3xl font-bold text-white mb-6">Sales Pipeline</h1>
                         <div className="flex gap-12">
                             <div>
-                                <div className="text-3xl font-bold text-white">142</div>
+                                <div className="text-3xl font-bold text-white">{isLoading ? "..." : leads.length}</div>
                                 <div className="text-sm font-medium text-blue-200">Active Leads</div>
                             </div>
                             <div>
-                                <div className="text-3xl font-bold text-white">$1.2M</div>
-                                <div className="text-sm font-medium text-blue-200">Potential Value</div>
+                                <div className="text-3xl font-bold text-white">{isLoading ? "..." : leads.filter(l => l.score >= 80).length}</div>
+                                <div className="text-sm font-medium text-blue-200">Qualified</div>
                             </div>
                             <div>
-                                <div className="text-3xl font-bold text-white">68%</div>
+                                <div className="text-3xl font-bold text-white">{isLoading ? "..." : Math.round(stats?.avg_score || 0)}</div>
                                 <div className="text-sm font-medium text-blue-200">Avg. Lead Score</div>
                             </div>
                         </div>
@@ -146,12 +131,10 @@ export default function CRMPage() {
 
                 {/* Filters */}
                 <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
-                    <TabButton label="All Leads" />
-                    <TabButton label="Interested" count={12} active />
-                    <TabButton label="Follow-up" count={5} />
-                    <TabButton label="Not Interested" />
-                    <TabButton label="Closed Won" />
-                    <TabButton label="Closed Lost" />
+                    <TabButton label="All Leads" active={activeFilter === "All"} onClick={() => setActiveFilter("All")} count={leads.length} />
+                    <TabButton label="Interested" count={interestedCount} active={activeFilter === "Interested"} onClick={() => setActiveFilter("Interested")} />
+                    <TabButton label="Follow-up" count={followUpCount} active={activeFilter === "Follow-up"} onClick={() => setActiveFilter("Follow-up")} />
+                    <TabButton label="qualified" active={activeFilter === "qualified"} onClick={() => setActiveFilter("qualified")} />
                 </div>
 
                 {/* Content Columns */}
@@ -188,14 +171,46 @@ export default function CRMPage() {
 
                         {/* Table Rows (Scrollable) */}
                         <div className="flex-1 overflow-y-auto divide-y divide-border">
-                            {leads.map((lead) => (
-                                <LeadRow key={lead.id} {...lead} />
-                            ))}
+                            {isLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : filteredLeads.length === 0 ? (
+                                <div className="py-12 text-center text-muted-foreground">
+                                    No leads found.
+                                </div>
+                            ) : (
+                                filteredLeads.slice(0, 20).map((lead) => {
+                                    const initials = lead.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+                                    const leadStatus = lead.score >= 80 ? "Interested" : lead.score >= 40 ? "Follow-up" : "New";
+                                    const avatarColor = lead.score >= 80 ? "bg-blue-600" : lead.score >= 40 ? "bg-purple-600" : "bg-slate-600";
+                                    const tagColor = lead.source === "linkedin" ? "blue" : lead.source === "csv" ? "slate" : "purple";
+                                    return (
+                                        <div key={lead.id} onClick={() => setSelectedLead(lead)} className="cursor-pointer">
+                                            <LeadRow
+                                                name={lead.name}
+                                                role={lead.title || "No title"}
+                                                company={lead.company || "Unknown"}
+                                                score={lead.score}
+                                                status={leadStatus}
+                                                lastActive={new Date(lead.created_at).toLocaleDateString()}
+                                                followUp="-"
+                                                tag={lead.source}
+                                                tagColor={tagColor}
+                                                remainder={lead.status}
+                                                initials={initials}
+                                                avatarColor={avatarColor}
+                                                selected={selectedLead?.id === lead.id}
+                                            />
+                                        </div>
+                                    );
+                                })
+                            )}
                         </div>
 
                         {/* Pagination */}
                         <div className="flex items-center justify-between border-t border-border px-6 py-3 text-xs text-muted-foreground">
-                            <span>Showing 1-5 of 142 leads</span>
+                            <span>Showing {Math.min(filteredLeads.length, 20)} of {filteredLeads.length} leads</span>
                             <div className="flex gap-2">
                                 <button className="rounded bg-muted/50 px-2 py-1 hover:bg-accent hover:text-accent-foreground">Prev</button>
                                 <button className="rounded bg-muted/50 px-2 py-1 hover:bg-accent hover:text-accent-foreground">Next</button>

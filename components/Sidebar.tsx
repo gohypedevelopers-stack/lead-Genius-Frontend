@@ -25,6 +25,11 @@ interface Organization {
   name: string;
   domain?: string;
   industry?: string;
+  business_model?: string;
+  target_locations?: string;
+  social_platforms?: string;
+  target_department?: string;
+  target_job_titles?: string;
   role: string;
 }
 
@@ -64,16 +69,19 @@ export default function Sidebar() {
     }
   }, [user]);
 
-  // Calculate profile completion
+  // Calculate profile completion - must match ProfileCompletionModal
   const getProfileCompletion = () => {
     let completed = 0;
-    const total = 5;
+    const total = 8; // Same 8 items as ProfileCompletionModal
 
     if (user?.full_name) completed++;
-    if (user?.email) completed++;
-    if (currentOrg?.name) completed++;
     if (currentOrg?.domain) completed++;
     if (currentOrg?.industry) completed++;
+    if (currentOrg?.business_model) completed++;
+    if (currentOrg?.target_locations) completed++;
+    if (currentOrg?.social_platforms) completed++;
+    if (currentOrg?.target_department) completed++;
+    if (currentOrg?.target_job_titles) completed++;
 
     return Math.round((completed / total) * 100);
   };

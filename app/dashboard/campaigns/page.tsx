@@ -1,9 +1,68 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
+
+interface Campaign {
+    id: string;
+    name: string;
+    status: string;
+    channel: string;
+    total_leads: number;
+    sent_count: number;
+    reply_count: number;
+    created_at: string;
+    updated_at: string;
+}
+
+interface CampaignsResponse {
+    campaigns: Campaign[];
+    total: number;
+}
 
 export default function CampaignsPage() {
+    const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [stats, setStats] = useState({
+        active: 0,
+        totalContacted: 0,
+        avgReplyRate: 0,
+        meetings: 0
+    });
+
+    useEffect(() => {
+        async function fetchCampaigns() {
+            setIsLoading(true);
+            const { data, error } = await api.get<CampaignsResponse>("/api/campaigns");
+
+            if (!error && data) {
+                setCampaigns(data.campaigns || []);
+
+                // Calculate stats from campaigns
+                const activeCampaigns = (data.campaigns || []).filter(c => c.status === "active" || c.status === "running");
+                const totalContacted = (data.campaigns || []).reduce((sum, c) => sum + (c.sent_count || 0), 0);
+                const totalReplies = (data.campaigns || []).reduce((sum, c) => sum + (c.reply_count || 0), 0);
+                const avgReply = totalContacted > 0 ? ((totalReplies / totalContacted) * 100).toFixed(1) : "0";
+
+                setStats({
+                    active: activeCampaigns.length,
+                    totalContacted,
+                    avgReplyRate: parseFloat(avgReply),
+                    meetings: Math.floor(totalReplies * 0.3) // Estimate
+                });
+            }
+            setIsLoading(false);
+        }
+
+        fetchCampaigns();
+    }, []);
+
+    const handleCreateCampaign = () => {
+        toast.info("Campaign creation coming soon!");
+    };
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-muted-foreground transition-colors duration-300">
             {/* Header */}
@@ -14,7 +73,10 @@ export default function CampaignsPage() {
                         Manage and optimize your multi-channel outreach strategies across LinkedIn, Email, and AI Calls.
                     </p>
                 </div>
-                <button className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-[0_4px_20px_rgba(37,99,255,0.3)] hover:bg-blue-500">
+                <button
+                    onClick={handleCreateCampaign}
+                    className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-[0_4px_20px_rgba(37,99,255,0.3)] hover:bg-blue-500"
+                >
                     <PlusIcon />
                     Create New Campaign
                 </button>
@@ -28,8 +90,8 @@ export default function CampaignsPage() {
                     <Link href="/dashboard/campaigns/active" className="contents">
                         <StatCard
                             label="Active Campaigns"
-                            value="12"
-                            trend="+2 this week"
+                            value={isLoading ? "..." : String(stats.active)}
+                            trend={`${campaigns.length} total`}
                             trendUp={true}
                             icon={<RocketIcon />}
                             trendType="text"
@@ -37,22 +99,22 @@ export default function CampaignsPage() {
                     </Link>
                     <StatCard
                         label="Total Leads Contacted"
-                        value="8,450"
-                        trend="+12% vs last mo."
+                        value={isLoading ? "..." : stats.totalContacted.toLocaleString()}
+                        trend="From all campaigns"
                         trendUp={true}
                         icon={<UsersIcon />}
                     />
                     <StatCard
                         label="Avg. Reply Rate"
-                        value="14.2%"
-                        trend="+2.4% vs last mo."
-                        trendUp={true}
+                        value={isLoading ? "..." : `${stats.avgReplyRate}%`}
+                        trend="Across all channels"
+                        trendUp={stats.avgReplyRate > 10}
                         icon={<ReplyIcon />}
                     />
                     <StatCard
                         label="Meetings Booked"
-                        value="342"
-                        trend="+15% vs last mo."
+                        value={isLoading ? "..." : String(stats.meetings)}
+                        trend="Estimated from replies"
                         trendUp={true}
                         icon={<CalendarIcon />}
                     />
@@ -123,36 +185,34 @@ export default function CampaignsPage() {
 
                         {/* Rows */}
                         <div className="divide-y divide-border">
-                            <ActivityRow
-                                name="CEO Outreach - Q3"
-                                created="Created 2 days ago"
-                                channel="Email"
-                                status="Active"
-                                progress={1240}
-                                total={5000}
-                                replied="8.5%"
-                                color="blue"
-                            />
-                            <ActivityRow
-                                name="Tech Founders Connection"
-                                created="Created 5 days ago"
-                                channel="LinkedIn"
-                                status="Active"
-                                progress={450}
-                                total={800}
-                                replied="22.1%"
-                                color="blue"
-                            />
-                            <ActivityRow
-                                name="Follow-up Voice Drops"
-                                created="Created 1 week ago"
-                                channel="AI Call"
-                                status="Paused"
-                                progress={100}
-                                total={100}
-                                replied="18.0%"
-                                color="amber" // Paused/Done style usually differs, keeping amber for Paused
-                            />
+                            {isLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : campaigns.length === 0 ? (
+                                <div className="py-12 text-center text-muted-foreground">
+                                    No campaigns yet. Create your first campaign!
+                                </div>
+                            ) : (
+                                campaigns.slice(0, 5).map((campaign) => {
+                                    const replyRate = campaign.sent_count > 0
+                                        ? ((campaign.reply_count / campaign.sent_count) * 100).toFixed(1)
+                                        : "0";
+                                    return (
+                                        <ActivityRow
+                                            key={campaign.id}
+                                            name={campaign.name}
+                                            created={`Created ${new Date(campaign.created_at).toLocaleDateString()}`}
+                                            channel={campaign.channel || "Email"}
+                                            status={campaign.status}
+                                            progress={campaign.sent_count}
+                                            total={campaign.total_leads}
+                                            replied={`${replyRate}%`}
+                                            color={campaign.status === "active" || campaign.status === "running" ? "blue" : "amber"}
+                                        />
+                                    );
+                                })
+                            )}
                         </div>
                     </div>
                 </div>
