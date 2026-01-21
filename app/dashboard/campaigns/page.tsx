@@ -4,65 +4,126 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Play, Pause, Trash2, MoreHorizontal, Loader2 } from "lucide-react";
 
 interface Campaign {
     id: string;
     name: string;
     status: string;
-    channel: string;
-    total_leads: number;
-    sent_count: number;
-    reply_count: number;
+    type: string;
+    leads_count: number;
+    contacted_count: number;
+    replied_count: number;
     created_at: string;
     updated_at: string;
 }
 
 interface CampaignsResponse {
-    campaigns: Campaign[];
+    items: Campaign[];
     total: number;
+}
+
+function mapCampaignTypeToChannel(type: string): string {
+    switch (type) {
+        case 'social': return 'LinkedIn';
+        case 'search': return 'Search';
+        case 'email': return 'Email';
+        case 'ai_call': return 'AI Call';
+        default: return type.charAt(0).toUpperCase() + type.slice(1);
+    }
 }
 
 export default function CampaignsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [stats, setStats] = useState({
+    const [stats, setStats] = useState<{
+        active: number;
+        totalContacted: number;
+        avgReplyRate: number;
+        meetings: number;
+        channels?: { linkedin: number; email: number; ai_call: number };
+    }>({
         active: 0,
         totalContacted: 0,
         avgReplyRate: 0,
         meetings: 0
     });
 
-    useEffect(() => {
-        async function fetchCampaigns() {
-            setIsLoading(true);
-            const { data, error } = await api.get<CampaignsResponse>("/api/campaigns");
-
-            if (!error && data) {
-                setCampaigns(data.campaigns || []);
-
-                // Calculate stats from campaigns
-                const activeCampaigns = (data.campaigns || []).filter(c => c.status === "active" || c.status === "running");
-                const totalContacted = (data.campaigns || []).reduce((sum, c) => sum + (c.sent_count || 0), 0);
-                const totalReplies = (data.campaigns || []).reduce((sum, c) => sum + (c.reply_count || 0), 0);
-                const avgReply = totalContacted > 0 ? ((totalReplies / totalContacted) * 100).toFixed(1) : "0";
-
-                setStats({
-                    active: activeCampaigns.length,
-                    totalContacted,
-                    avgReplyRate: parseFloat(avgReply),
-                    meetings: Math.floor(totalReplies * 0.3) // Estimate
-                });
+    const handleCampaignAction = async (id: string, action: 'run' | 'pause' | 'resume' | 'delete') => {
+        try {
+            let response;
+            switch (action) {
+                case 'run':
+                    response = await api.post(`/api/campaigns/${id}/run`);
+                    break;
+                case 'pause':
+                    response = await api.post(`/api/campaigns/${id}/pause`);
+                    break;
+                case 'resume':
+                    response = await api.post(`/api/campaigns/${id}/resume`);
+                    break;
+                case 'delete':
+                    response = await api.delete(`/api/campaigns/${id}`);
+                    break;
             }
-            setIsLoading(false);
+
+            if (response?.error) {
+                toast.error(`Failed to ${action} campaign: ${response.error.detail}`);
+            } else {
+                toast.success(`Campaign ${action} successful`);
+                // Refresh list
+                const { data } = await api.get<CampaignsResponse>("/api/campaigns");
+                if (data) setCampaigns(data.items || []);
+            }
+        } catch (error) {
+            toast.error("An error occurred");
+        }
+    };
+
+    useEffect(() => {
+        async function fetchData() {
+            setIsLoading(true);
+            try {
+                const [campaignsRes, statsRes] = await Promise.all([
+                    api.get<CampaignsResponse>("/api/campaigns"),
+                    api.get<any>("/api/campaigns/overview-stats")
+                ]);
+
+                if (campaignsRes.data) {
+                    setCampaigns(campaignsRes.data.items || []);
+                }
+
+                if (statsRes.data) {
+                    setStats({
+                        active: statsRes.data.active_campaigns,
+                        totalContacted: statsRes.data.total_contacted,
+                        avgReplyRate: statsRes.data.avg_reply_rate,
+                        meetings: statsRes.data.meetings_booked,
+                        channels: statsRes.data.channels
+                    });
+                }
+            } catch (error) {
+                console.error("Failed to fetch campaign data:", error);
+            } finally {
+                setIsLoading(false);
+            }
         }
 
-        fetchCampaigns();
+        fetchData();
     }, []);
 
     const handleCreateCampaign = () => {
         toast.info("Campaign creation coming soon!");
     };
+
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-muted-foreground transition-colors duration-300">
             {/* Header */}
@@ -132,7 +193,7 @@ export default function CampaignsPage() {
                             <ChannelCard
                                 title="LinkedIn Outreach"
                                 desc="Automate connection requests, profile visits, and follow-up sequences safely."
-                                activeCount={4}
+                                activeCount={isLoading ? "..." : (stats.channels?.linkedin || 0)}
                                 icon={<LinkedInIcon />}
                                 gradient="from-blue-600/20 to-cyan-500/5"
                                 borderColor="border-blue-500/20"
@@ -142,7 +203,7 @@ export default function CampaignsPage() {
                         <ChannelCard
                             title="Email Outreach"
                             desc="Cold email sequences with A/B testing, personalization, and deliverability warm-up."
-                            activeCount={7}
+                            activeCount={isLoading ? "..." : (stats.channels?.email || 0)}
                             icon={<MailIcon />}
                             gradient="from-emerald-600/20 to-teal-500/5"
                             borderColor="border-emerald-500/20"
@@ -151,7 +212,7 @@ export default function CampaignsPage() {
                         <ChannelCard
                             title="AI Call Agent"
                             desc="Deploy conversational AI agents to qualify leads over the phone instantly."
-                            activeCount={1}
+                            activeCount={isLoading ? "..." : (stats.channels?.ai_call || 0)}
                             icon={<PhoneIcon />}
                             badge="NEW"
                             gradient="from-indigo-600/20 to-purple-500/5"
@@ -195,20 +256,22 @@ export default function CampaignsPage() {
                                 </div>
                             ) : (
                                 campaigns.slice(0, 5).map((campaign) => {
-                                    const replyRate = campaign.sent_count > 0
-                                        ? ((campaign.reply_count / campaign.sent_count) * 100).toFixed(1)
+                                    const replyRate = campaign.contacted_count > 0
+                                        ? ((campaign.replied_count / campaign.contacted_count) * 100).toFixed(1)
                                         : "0";
                                     return (
                                         <ActivityRow
                                             key={campaign.id}
+                                            id={campaign.id}
                                             name={campaign.name}
                                             created={`Created ${new Date(campaign.created_at).toLocaleDateString()}`}
-                                            channel={campaign.channel || "Email"}
+                                            channel={mapCampaignTypeToChannel(campaign.type)}
                                             status={campaign.status}
-                                            progress={campaign.sent_count}
-                                            total={campaign.total_leads}
+                                            progress={campaign.contacted_count}
+                                            total={campaign.leads_count}
                                             replied={`${replyRate}%`}
                                             color={campaign.status === "active" || campaign.status === "running" ? "blue" : "amber"}
+                                            onAction={handleCampaignAction}
                                         />
                                     );
                                 })
@@ -285,16 +348,21 @@ function ChannelCard({ title, desc, activeCount, icon, gradient, borderColor, ic
     )
 }
 
-function ActivityRow({ name, created, channel, status, progress, total, replied, color }: any) {
+function ActivityRow({ id, name, created, channel, status, progress, total, replied, color, onAction }: any) {
     let icon = <MailIcon className="h-4 w-4" />;
     let iconColor = "text-blue-400";
     if (channel === 'LinkedIn') { icon = <LinkedInIcon className="h-4 w-4" />; iconColor = "text-sky-400"; }
     else if (channel === 'AI Call') { icon = <PhoneIcon className="h-4 w-4" />; iconColor = "text-purple-400"; }
 
-    let statusStyle = "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20";
-    if (status === 'Paused') statusStyle = "bg-amber-500/10 text-amber-500 border border-amber-500/20";
+    // Normalize status to lowercase for consistent checks
+    const s = status?.toLowerCase() || 'draft';
 
-    const progressPercent = (progress / total) * 100;
+    let statusStyle = "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20";
+    if (s === 'paused') statusStyle = "bg-amber-500/10 text-amber-500 border border-amber-500/20";
+    if (s === 'draft') statusStyle = "bg-gray-500/10 text-gray-500 border border-gray-500/20";
+    if (s === 'completed') statusStyle = "bg-blue-500/10 text-blue-500 border border-blue-500/20";
+
+    const progressPercent = total > 0 ? (progress / total) * 100 : 0;
 
     return (
         <div className="grid grid-cols-12 gap-4 px-6 py-5 items-center hover:bg-accent/50 transition">
@@ -322,7 +390,7 @@ function ActivityRow({ name, created, channel, status, progress, total, replied,
                     <span>/ {total.toLocaleString()}</span>
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-secondary">
-                    <div className={`h-full rounded-full ${status === 'Paused' ? 'bg-amber-500' : 'bg-blue-600'}`} style={{ width: `${progressPercent}%` }}></div>
+                    <div className={`h-full rounded-full ${s === 'paused' ? 'bg-amber-500' : 'bg-blue-600'}`} style={{ width: `${progressPercent}%` }}></div>
                 </div>
             </div>
 
@@ -331,9 +399,50 @@ function ActivityRow({ name, created, channel, status, progress, total, replied,
             </div>
 
             <div className="col-span-1 text-right">
-                <button className="text-muted-foreground hover:text-foreground transition">
-                    <DotsIcon />
-                </button>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button className="text-muted-foreground hover:text-foreground transition p-1 hover:bg-muted rounded">
+                            <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+
+                        {/* Start / Resume */}
+                        {(s === 'draft' || s === 'paused') && (
+                            <DropdownMenuItem onClick={() => onAction(id, s === 'draft' ? 'run' : 'resume')}>
+                                <Play className="mr-2 h-4 w-4 text-emerald-500" />
+                                {s === 'draft' ? 'Start Campaign' : 'Resume'}
+                            </DropdownMenuItem>
+                        )}
+
+                        {/* Pause */}
+                        {(s === 'active' || s === 'running' || s === 'processing') && (
+                            <DropdownMenuItem onClick={() => onAction(id, 'pause')}>
+                                <Pause className="mr-2 h-4 w-4 text-amber-500" /> Pause
+                            </DropdownMenuItem>
+                        )}
+
+                        {/* Restart (for completed) */}
+                        {s === 'completed' && (
+                            <DropdownMenuItem onClick={() => onAction(id, 'run')}>
+                                <Play className="mr-2 h-4 w-4 text-blue-500" /> Restart
+                            </DropdownMenuItem>
+                        )}
+
+                        {/* Edit - Always available */}
+                        {/* <DropdownMenuItem onClick={() => toast.info("Edit coming soon")}>
+                             <Edit className="mr-2 h-4 w-4" /> Edit
+                        </DropdownMenuItem> */}
+
+                        <DropdownMenuSeparator />
+
+                        <DropdownMenuItem onClick={() => onAction(id, 'delete')} className="text-rose-500 hover:text-rose-600">
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
         </div>
     )

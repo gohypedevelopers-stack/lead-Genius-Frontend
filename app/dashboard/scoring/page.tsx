@@ -20,7 +20,7 @@ interface Lead {
 }
 
 interface LeadsResponse {
-    leads: Lead[];
+    items: Lead[];
     total: number;
 }
 
@@ -39,20 +39,51 @@ export default function ScoringPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
+    // Campaign handling
+    const [campaigns, setCampaigns] = useState<{ id: string, name: string }[]>([]);
+    const [selectedCampaignId, setSelectedCampaignId] = useState<string>("");
+    const [isRecalculating, setIsRecalculating] = useState(false);
+
     useEffect(() => {
+        async function loadCampaigns() {
+            const res = await api.get<{ items: { id: string, name: string }[] }>("/api/campaigns/");
+            if (!res.error && res.data?.items) {
+                setCampaigns(res.data.items);
+                // Select first campaign by default if available
+                if (res.data.items.length > 0) {
+                    setSelectedCampaignId(res.data.items[0].id);
+                }
+            }
+        }
+        loadCampaigns();
+    }, []);
+
+    useEffect(() => {
+        // Only fetch if we have a campaign selected or just generic fetch
+        // For this page, usually better to wait for campaign ID if we want campaign context
+        // But to fallback, we can fetch all if no ID
+
         async function fetchData() {
             setIsLoading(true);
 
+            let url = "/api/leads?limit=50";
+            if (selectedCampaignId) {
+                url += `&campaign_id=${selectedCampaignId}`;
+            }
+
             // Fetch leads
-            const leadsRes = await api.get<LeadsResponse>("/api/leads?limit=20");
+            const leadsRes = await api.get<LeadsResponse>(url);
             if (!leadsRes.error && leadsRes.data) {
-                setLeads(leadsRes.data.leads || []);
-                if (leadsRes.data.leads?.length > 0) {
-                    setSelectedLead(leadsRes.data.leads[0]);
+                setLeads(leadsRes.data.items || []); // Match backend pagination structure
+                if (leadsRes.data.items?.length > 0) {
+                    setSelectedLead(leadsRes.data.items[0]);
+                } else {
+                    setSelectedLead(null);
                 }
             }
 
-            // Fetch stats
+            // Fetch generic stats (or campaign specific if API supported it, keeping generic for now or filtered)
+            // Ideally stats endpoint would take campaign_id too.
             const statsRes = await api.get<LeadStats>("/api/leads/stats");
             if (!statsRes.error && statsRes.data) {
                 setStats(statsRes.data);
@@ -62,9 +93,34 @@ export default function ScoringPage() {
         }
 
         fetchData();
-    }, []);
+    }, [selectedCampaignId]); // Refetch when campaign changes
 
-    // Filter leads based on tab
+    const handleRecalculate = async () => {
+        if (!selectedCampaignId) {
+            toast.error("Please select a campaign first");
+            return;
+        }
+
+        setIsRecalculating(true);
+        toast.info("Recalculating scores...");
+
+        const res = await api.post(`/api/scoring/campaign/${selectedCampaignId}/recalculate`, {});
+
+        if (!res.error) {
+            toast.success("Scores updated successfully!");
+            // Refresh data
+            // logic same as useEffect, extracted ideally
+            // simplified: triggering re-fetch via temp state workarounds or just refetched
+            // Quick hack: toggle a dummy state or just call function if extracted.
+            // Let's just reload page for now or better, copy paste fetch logic
+            window.location.reload();
+        } else {
+            toast.error("Failed to update scores");
+        }
+        setIsRecalculating(false);
+    };
+
+    // Filter leads based on tab (...)
     const filteredLeads = leads.filter(lead => {
         if (activeTab === "Qualified (80+)") return lead.score >= 80;
         if (activeTab === "Needs Review") return lead.score >= 40 && lead.score < 80;
@@ -86,19 +142,30 @@ export default function ScoringPage() {
                         <span className="text-blue-500">Lead Scoring</span>
                     </div>
                     <h1 className="mt-1 text-2xl font-bold text-foreground">Lead Scoring</h1>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                        B2B Lead Intelligence, Scoring & Outreach Platform for identifying,
-                        qualifying, enriching, and converting high-intent leads.
-                    </p>
+
+                    {/* Campaign Select */}
+                    <div className="mt-3 flex items-center gap-2">
+                        <label className="text-sm text-foreground font-medium">Campaign:</label>
+                        <select
+                            className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+                            value={selectedCampaignId}
+                            onChange={(e) => setSelectedCampaignId(e.target.value)}
+                        >
+                            <option value="">Select a Campaign...</option>
+                            {campaigns.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 <div className="flex gap-3">
-                    <button className="flex items-center gap-2 rounded-lg border border-input bg-background/50 px-4 py-2 text-sm font-medium text-foreground transition hover:bg-accent hover:text-accent-foreground">
-                        <UploadIcon />
-                        Import CSV
-                    </button>
-                    <button className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 shadow-[0_4px_20px_rgba(37,99,255,0.2)]">
-                        <LightningIcon />
-                        Run Batch Scoring
+                    <button
+                        onClick={handleRecalculate}
+                        disabled={isRecalculating || !selectedCampaignId}
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 shadow-[0_4px_20px_rgba(37,99,255,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isRecalculating ? <Loader2 className="h-4 w-4 animate-spin" /> : <LightningIcon />}
+                        {isRecalculating ? "Calculating..." : "Recalculate Scores"}
                     </button>
                 </div>
             </header>
@@ -230,61 +297,82 @@ export default function ScoringPage() {
                             </div>
 
                             {/* Lead Analysis Card */}
-                            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm transition-colors duration-300">
-                                <div className="flex items-center justify-between mb-6">
-                                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                                        <div className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-                                        Lead Analysis
+                            {/* Lead Analysis Card */}
+                            {selectedLead ? (
+                                <div className="rounded-2xl border border-border bg-card p-5 shadow-sm transition-colors duration-300">
+                                    <div className="flex items-center justify-between mb-6">
+                                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                            <div className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                                            Lead Analysis
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <button className="h-8 w-8 rounded bg-muted/50 flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-accent-foreground cursor-pointer transition">
+                                                <CopyIcon />
+                                            </button>
+                                            <button className="h-8 w-8 rounded bg-muted/50 flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-accent-foreground cursor-pointer transition">
+                                                <ShareIcon />
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-1">
-                                        {/* Simple placeholders for card actions */}
-                                        <div className="h-8 w-8 rounded bg-muted/50 flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-accent-foreground cursor-pointer"><CopyIcon /></div>
-                                        <div className="h-8 w-8 rounded bg-muted/50 flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-accent-foreground cursor-pointer"><ShareIcon /></div>
-                                    </div>
-                                </div>
 
-                                {/* Score Gauge Area */}
-                                <div className="flex items-center gap-6 mb-8">
-                                    <div className="relative grid h-20 w-20 place-items-center rounded-full border-4 border-blue-600 bg-blue-500/10 shadow-[0_0_20px_rgba(37,99,255,0.15)]">
-                                        <span className="text-2xl font-bold text-foreground">94</span>
+                                    {/* Score Gauge Area */}
+                                    <div className="flex items-center gap-6 mb-8">
+                                        <div className={`relative grid h-20 w-20 place-items-center rounded-full border-4 ${selectedLead.score >= 80 ? 'border-emerald-500 bg-emerald-500/10' : selectedLead.score >= 50 ? 'border-amber-500 bg-amber-500/10' : 'border-rose-500 bg-rose-500/10'}`}>
+                                            <span className="text-2xl font-bold text-foreground">{selectedLead.score}</span>
+                                        </div>
+                                        <div>
+                                            <div className="text-lg font-bold text-foreground">
+                                                {selectedLead.score >= 80 ? 'Excellent Match' : selectedLead.score >= 50 ? 'Potential Match' : 'Low Match'}
+                                            </div>
+                                            <div className="text-xs leading-relaxed text-muted-foreground w-40">
+                                                {selectedLead.score >= 80
+                                                    ? 'Score is in the top 5% of your pipeline based on current ICP.'
+                                                    : 'Profile needs further review to determine fit.'}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <div className="text-lg font-bold text-foreground">Excellent Match</div>
-                                        <div className="text-xs leading-relaxed text-muted-foreground w-40">
-                                            Score is in the top 5% of your pipeline based on current ICP.
+
+                                    {/* Key Signals */}
+                                    <div className="space-y-4">
+                                        <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider mb-3">Key Signals</div>
+
+                                        <SignalItem
+                                            title="Job Title"
+                                            desc={`"${selectedLead.title || 'N/A'}" aligns with target persona.`}
+                                            match={selectedLead.score >= 60 ? 'high' : 'medium'}
+                                        />
+                                        <SignalItem
+                                            title="Company Fit"
+                                            desc={`${selectedLead.company || 'Company'} matches industry criteria.`}
+                                            match={selectedLead.score >= 50 ? 'medium' : 'low'}
+                                        />
+                                        {selectedLead.source && (
+                                            <SignalItem
+                                                title="Source"
+                                                desc={`Extracted from ${selectedLead.source}`}
+                                                match="high"
+                                            />
+                                        )}
+                                    </div>
+
+                                    {/* Profile Snippet Placeholder */}
+                                    <div className="mt-8 pt-4 border-t border-border">
+                                        <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider mb-2">Profile Snippet</div>
+                                        <div className="text-xs text-muted-foreground leading-relaxed">
+                                            {selectedLead.name} works at <strong>{selectedLead.company}</strong> as a {selectedLead.title}.
+                                            {selectedLead.linkedin_url && (
+                                                <a href={selectedLead.linkedin_url} target="_blank" rel="noopener noreferrer" className="block mt-2 text-blue-500 hover:underline">
+                                                    View LinkedIn Profile
+                                                </a>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
-
-                                {/* Key Signals */}
-                                <div className="space-y-4">
-                                    <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider mb-3">Key Signals</div>
-
-                                    <SignalItem
-                                        title="Senior Decision Maker"
-                                        desc='"VP" title aligns with Tier 1 persona.'
-                                        match="high"
-                                    />
-                                    <SignalItem
-                                        title="Active Hiring"
-                                        desc='Company has 12 open engineering roles.'
-                                        match="high"
-                                    />
-                                    <SignalItem
-                                        title="Recent Activity"
-                                        desc='Posted about "Scaling Challenges" 2d ago.'
-                                        match="medium"
-                                    />
-
+                            ) : (
+                                <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-8 text-center text-muted-foreground">
+                                    <p>Select a lead to view analysis.</p>
                                 </div>
-
-                                {/* Profile Snippet Placeholder */}
-                                <div className="mt-8 pt-4 border-t border-border">
-                                    <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider mb-2">Profile Snippet</div>
-                                    <div className="h-1 bg-muted/50 rounded w-full mb-2"></div>
-                                    <div className="h-1 bg-muted/50 rounded w-2/3"></div>
-                                </div>
-                            </div>
+                            )}
                         </div>
                     )}
                 </div>

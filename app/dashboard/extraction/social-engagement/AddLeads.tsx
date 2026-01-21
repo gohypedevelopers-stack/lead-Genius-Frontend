@@ -13,10 +13,13 @@ import {
     X,
     Info,
     Clock,
-    Check
+    Check,
+    Loader2
 } from "lucide-react";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
-export default function AddLeads({ onClose }: { onClose: () => void }) {
+export default function AddLeads({ onClose, onSuccess }: { onClose: () => void; onSuccess?: () => void }) {
     const [step, setStep] = useState(1);
     const [selected, setSelected] = useState<string>("basic-search");
     const [url, setUrl] = useState("https://www.linkedin.com/search/results/people/?keywords=2026%2");
@@ -27,26 +30,45 @@ export default function AddLeads({ onClose }: { onClose: () => void }) {
     const [filterExisting, setFilterExisting] = useState(true);
     const [filterLowConnections, setFilterLowConnections] = useState(true);
 
-    // Step 4
-    const [listName, setListName] = useState("VP and Directors, B2B software, SF Bay Area");
+    // Step 4 - REQUIRE USER INPUT
+    const [listName, setListName] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleNext = () => {
-        if (step < 4) {
+    const handleNext = async () => {
+        if (step < 3) {
             setStep(step + 1);
         } else {
-            // Handle final submission
-            console.log("Creating list with:", {
-                selected,
-                url,
-                profileCount,
-                customCount,
-                filters: {
-                    filterExisting,
-                    filterLowConnections
-                },
-                listName
-            });
-            onClose();
+            // Submit to backend
+            try {
+                setIsLoading(true);
+                const payload = {
+                    name: listName, // User input collected in Step 1
+                    type: selected, // e.g., 'linkedin-post'
+                    settings: {
+                        url,
+                        target_count: profileCount === 'max' ? 245 : customCount,
+                        filters: {
+                            existing_leads: filterExisting,
+                            low_connections: filterLowConnections
+                        }
+                    }
+                };
+
+                const { data, error } = await api.post("/api/campaigns", payload);
+
+                if (error) {
+                    toast.error(`Failed to create list: ${error.detail || "Unknown error"}`);
+                } else {
+                    toast.success("List created successfully!");
+                    if (onSuccess) onSuccess();
+                    onClose();
+                }
+            } catch (e) {
+                console.error("Create campaign error:", e);
+                toast.error("An unexpected error occurred.");
+            } finally {
+                setIsLoading(false);
+            }
         }
     };
 
@@ -87,7 +109,7 @@ export default function AddLeads({ onClose }: { onClose: () => void }) {
                     <div className="mb-2 flex items-center gap-3 text-[11px] font-bold tracking-widest text-muted-foreground uppercase">
                         <span>Create a list of leads below</span>
                         <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
-                        <span>Step {step} / 4</span>
+                        <span>Step {step} / 3</span>
                     </div>
 
                     {/* Progress Bar */}
@@ -95,11 +117,26 @@ export default function AddLeads({ onClose }: { onClose: () => void }) {
                         <div className={`h-1 w-16 rounded-full ${step >= 1 ? "bg-blue-600" : "bg-muted"}`} />
                         <div className={`h-1 w-16 rounded-full ${step >= 2 ? "bg-blue-600" : "bg-muted"}`} />
                         <div className={`h-1 w-16 rounded-full ${step >= 3 ? "bg-blue-600" : "bg-muted"}`} />
-                        <div className={`h-1 w-16 rounded-full ${step >= 4 ? "bg-blue-600" : "bg-muted"}`} />
                     </div>
 
                     {step === 1 && (
                         <>
+                            <h2 className="mb-2 text-2xl font-semibold text-foreground">
+                                Name your campaign
+                            </h2>
+                            <p className="mb-6 text-sm text-muted-foreground">
+                                Give your campaign a memorable name to track it later.
+                            </p>
+
+                            <input
+                                type="text"
+                                value={listName}
+                                onChange={(e) => setListName(e.target.value)}
+                                className="mb-8 h-12 w-full rounded-xl border border-input bg-background/50 px-4 text-sm text-foreground focus:border-blue-500 focus:outline-none transition-colors"
+                                placeholder="e.g. Q1 Marketing Outreach"
+                                autoFocus
+                            />
+
                             <h2 className="mb-6 text-2xl font-semibold text-foreground">
                                 How would you like to add leads?
                             </h2>
@@ -307,27 +344,6 @@ export default function AddLeads({ onClose }: { onClose: () => void }) {
                         </>
                     )}
 
-                    {step === 4 && (
-                        <>
-                            <h2 className="mb-2 text-2xl font-semibold text-foreground">
-                                Give your list a name
-                            </h2>
-
-                            <div className="mb-8 mt-6">
-                                <label className="mb-2 block text-sm text-muted-foreground">
-                                    List name
-                                </label>
-                                <input
-                                    type="text"
-                                    value={listName}
-                                    onChange={(e) => setListName(e.target.value)}
-                                    className="h-12 w-full rounded-xl border border-input bg-background/50 px-4 text-sm text-foreground focus:border-blue-500 focus:outline-none transition-colors"
-                                    placeholder="Enter list name..."
-                                />
-                            </div>
-                        </>
-                    )}
-
                     {/* Footer Actions */}
                     <div className="mt-8 flex justify-end gap-3">
                         {step > 1 && (
@@ -340,14 +356,17 @@ export default function AddLeads({ onClose }: { onClose: () => void }) {
                         )}
                         <button
                             onClick={handleNext}
-                            className={`rounded-xl px-8 py-3 text-sm font-semibold text-white shadow-lg transition
-                                ${step === 4
+                            disabled={isLoading || (step === 1 && !listName.trim())}
+                            className={`rounded-xl px-8 py-3 text-sm font-semibold text-white shadow-lg transition flex items-center gap-2
+                                ${step === 3
                                     ? "bg-[#6366F1] shadow-[#6366F1]/25 hover:bg-[#6366F1]/90" // Indigo/Purple for final step
                                     : "bg-blue-600 shadow-blue-500/25 hover:bg-blue-500"
                                 }
+                                ${(isLoading || (step === 1 && !listName.trim())) ? "opacity-70 cursor-not-allowed" : ""}
                             `}
                         >
-                            {step === 4 ? "Create a list" : "Next"}
+                            {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                            {step === 3 ? "Create a list" : "Next"}
                         </button>
                     </div>
                 </div>

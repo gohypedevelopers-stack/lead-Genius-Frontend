@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Globe, FileSearch, Loader2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AddLeads from "./social-engagement/AddLeads";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -22,7 +22,7 @@ interface Lead {
 }
 
 interface LeadsResponse {
-  leads: Lead[];
+  items: Lead[];
   total: number;
   page: number;
   limit: number;
@@ -45,35 +45,35 @@ export default function LeadExtractionPage() {
   const [total, setTotal] = useState(0);
 
   // Fetch leads and stats
-  useEffect(() => {
-    async function fetchData() {
-      setIsLoading(true);
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
 
-      // Fetch leads
-      const leadsRes = await api.get<LeadsResponse>(`/api/leads?page=${page}&limit=10`);
-      if (!leadsRes.error && leadsRes.data) {
-        setLeads(leadsRes.data.leads || []);
-        setTotal(leadsRes.data.total || 0);
-      }
-
-      // Fetch stats
-      const statsRes = await api.get<LeadStats>("/api/leads/stats");
-      if (!statsRes.error && statsRes.data) {
-        setStats(statsRes.data);
-      }
-
-      setIsLoading(false);
+    // Fetch leads
+    const leadsRes = await api.get<LeadsResponse>(`/api/leads?page=${page}&limit=10`);
+    if (!leadsRes.error && leadsRes.data) {
+      setLeads(leadsRes.data.items || []); // Fixed: backend returns 'items'
+      setTotal(leadsRes.data.total || 0);
     }
 
-    fetchData();
+    // Fetch stats
+    const statsRes = await api.get<LeadStats>("/api/leads/stats");
+    if (!statsRes.error && statsRes.data) {
+      setStats(statsRes.data);
+    }
+
+    setIsLoading(false);
   }, [page]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const enrichedCount = stats?.by_enrichment?.completed || 0;
   const enrichmentRate = stats?.total ? Math.round((enrichedCount / stats.total) * 100) : 0;
 
   return (
     <div className="relative h-full w-full bg-background text-foreground transition-colors duration-300">
-      {showAddLeads && <AddLeads onClose={() => setShowAddLeads(false)} />}
+      {showAddLeads && <AddLeads onClose={() => setShowAddLeads(false)} onSuccess={fetchData} />}
 
       <div className="h-full w-full overflow-y-auto p-6">
 
@@ -95,7 +95,10 @@ export default function LeadExtractionPage() {
             </p>
           </div>
 
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-500 transition-colors">
+          <button
+            onClick={() => setShowAddLeads(true)}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-500 transition-colors"
+          >
             <span className="text-lg leading-none">+</span>
             New Campaign
           </button>
@@ -293,8 +296,8 @@ export default function LeadExtractionPage() {
                         </td>
                         <td className="py-3">
                           <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${lead.status === "qualified" ? "bg-emerald-500/10 text-emerald-500" :
-                              lead.status === "contacted" ? "bg-blue-500/10 text-blue-500" :
-                                "bg-gray-500/10 text-gray-400"
+                            lead.status === "contacted" ? "bg-blue-500/10 text-blue-500" :
+                              "bg-gray-500/10 text-gray-400"
                             }`}>
                             {lead.status}
                           </span>
