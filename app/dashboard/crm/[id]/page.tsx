@@ -236,11 +236,13 @@ export default function LeadDetailsPage({ params }: { params: Promise<{ id: stri
                         {lead.custom_fields && Object.keys(lead.custom_fields).length > 0 && (
                             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
                                 <h2 className="text-lg font-bold text-foreground mb-4">Extracted Info</h2>
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     {Object.entries(lead.custom_fields).map(([key, value]) => (
-                                        <div key={key} className="flex justify-between items-center text-sm">
-                                            <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}:</span>
-                                            <span className="text-foreground max-w-[150px] truncate" title={String(value)}>{String(value)}</span>
+                                        <div key={key} className="text-sm border-b border-border last:border-0 pb-3 last:pb-0">
+                                            <div className="font-medium text-muted-foreground capitalize mb-1">{key.replace(/_/g, ' ')}</div>
+                                            <div className="text-foreground pl-2">
+                                                <DataRenderer value={value} />
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -298,3 +300,44 @@ function InfoItem({ label, value, icon, link, verified, placeholder, external }:
 }
 
 function UserIcon({ className }: { className?: string }) { return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>; }
+
+function DataRenderer({ value }: { value: any }) {
+    if (value === null || value === undefined) return <span className="text-muted-foreground">-</span>;
+
+    if (typeof value === 'boolean') {
+        return <span className={value ? "text-emerald-500 font-medium" : "text-red-500"}>{value ? "Yes" : "No"}</span>;
+    }
+
+    if (Array.isArray(value)) {
+        if (value.length === 0) return <span className="text-muted-foreground text-xs">Empty list</span>;
+        return (
+            <ul className="list-disc pl-4 space-y-1 mt-1">
+                {value.map((item, i) => (
+                    <li key={i}><DataRenderer value={item} /></li>
+                ))}
+            </ul>
+        );
+    }
+
+    if (typeof value === 'object') {
+        if (Object.keys(value).length === 0) return <span className="text-muted-foreground text-xs">Empty object</span>;
+        return (
+            <div className="pl-2 border-l-2 border-border mt-1 space-y-2">
+                {Object.entries(value).map(([subKey, subValue]) => (
+                    <div key={subKey} className="text-xs">
+                        <span className="text-muted-foreground font-medium mr-2">{subKey.replace(/_/g, ' ')}:</span>
+                        <span className="text-foreground"><DataRenderer value={subValue} /></span>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    // Handle string/numbers
+    const strValue = String(value);
+    if (strValue.startsWith('http')) {
+        return <a href={strValue} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all">{strValue}</a>;
+    }
+
+    return <span>{strValue}</span>;
+}

@@ -35,14 +35,18 @@ export default function AddLeads({ onClose, onSuccess }: { onClose: () => void; 
     const [listName, setListName] = useState("");
     const [isLoading, setIsLoading] = useState(false);
 
+    // Polling State
+    const [isPolling, setIsPolling] = useState(false);
+    const [pollingStatus, setPollingStatus] = useState("Initializing...");
+
     const handleNext = async () => {
         if (step < 3) {
             setStep(step + 1);
         } else {
             // Submit to backend
             try {
-                // Open new tab for LinkedIn Post Search immediately upon creation
-                if (selected === "linkedin-post" && url) {
+                // Open new tab for LinkedIn Post Search only if NOT using Cloud Extraction
+                if (selected === "linkedin-post" && url && !useCloudScraper) {
                     window.open(url, "_blank");
                 }
 
@@ -61,26 +65,67 @@ export default function AddLeads({ onClose, onSuccess }: { onClose: () => void; 
                     }
                 };
 
-                const { data, error } = await api.post("/api/campaigns", payload);
+                const { data, error } = await api.post<any>("/api/campaigns", payload);
 
-                if (error) {
-                    toast.error(`Failed to create list: ${error.detail || "Unknown error"}`);
+                if (error || !data) {
+                    toast.error(`Failed to create list: ${error?.detail || "Unknown error"}`);
+                    setIsLoading(false);
                 } else {
-                    toast.success("List created successfully!");
-                    if (onSuccess) onSuccess();
-                    onClose();
+                    if (useCloudScraper) {
+                        // Start Polling
+                        setIsPolling(true);
+                        setPollingStatus("Starting cloud extraction...");
+
+                        // ID of the created campaign
+                        const campaignId = data.id;
+
+                        const pollInterval = setInterval(async () => {
+                            try {
+                                const { data: campaign, error: pollError } = await api.get<any>(`/api/campaigns/${campaignId}`);
+
+                                if (pollError) {
+                                    // retrying...
+                                    return;
+                                }
+
+                                if (campaign.status === "completed") {
+                                    clearInterval(pollInterval);
+                                    setIsPolling(false);
+                                    setIsLoading(false);
+                                    toast.success(`Extraction complete! found ${campaign.leads_count || 0} leads.`);
+                                    if (onSuccess) onSuccess();
+                                    onClose();
+                                } else if (campaign.status === "failed") {
+                                    clearInterval(pollInterval);
+                                    setIsPolling(false);
+                                    setIsLoading(false);
+                                    toast.error("Extraction failed. Please check the URL/permissions.");
+                                    onClose();
+                                } else {
+                                    setPollingStatus(`Extracting data... (${campaign.status})`);
+                                }
+                            } catch (e) {
+                                console.error("Polling error", e);
+                            }
+                        }, 2000); // Check every 2s
+
+                    } else {
+                        toast.success("List created successfully!");
+                        setIsLoading(false);
+                        if (onSuccess) onSuccess();
+                        onClose();
+                    }
                 }
             } catch (e) {
                 console.error("Create campaign error:", e);
                 toast.error("An unexpected error occurred.");
-            } finally {
                 setIsLoading(false);
             }
         }
     };
 
     const handleBack = () => {
-        if (step > 1) {
+        if (step > 1 && !isPolling) {
             setStep(step - 1);
         }
     };
@@ -104,14 +149,28 @@ export default function AddLeads({ onClose, onSuccess }: { onClose: () => void; 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <div className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl border border-border bg-card shadow-2xl transition-colors duration-300">
                 {/* Close Button */}
-                <button
-                    onClick={onClose}
-                    className="absolute top-6 right-6 z-10 text-muted-foreground hover:text-foreground transition"
-                >
-                    <X size={24} />
-                </button>
+                {!isPolling && (
+                    <button
+                        onClick={onClose}
+                        className="absolute top-6 right-6 z-10 text-muted-foreground hover:text-foreground transition"
+                    >
+                        <X size={24} />
+                    </button>
+                )}
 
                 <div className="p-6 lg:p-8">
+                    {/* Polling UI Overlay */}
+                    {isPolling && (
+                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-card/95 backdrop-blur-sm rounded-3xl">
+                            <Loader2 className="h-12 w-12 animate-spin text-blue-500 mb-4" />
+                            <h3 className="text-xl font-semibold text-foreground mb-2">Extracting Leads</h3>
+                            <p className="text-muted-foreground text-center max-w-sm px-4">
+                                {pollingStatus} <br />
+                                <span className="text-xs opacity-70">Please wait while we connect to LinkedIn...</span>
+                            </p>
+                        </div>
+                    )}
+
                     {/* Header / Progress */}
                     <div className="mb-2 flex items-center gap-3 text-[11px] font-bold tracking-widest text-muted-foreground uppercase">
                         <span>Create a list of leads below</span>
