@@ -87,6 +87,17 @@ export default function BatchLinkedInMessaging({
                 }));
                 setProgress(updatedProgress);
 
+                // NOTIFY EXTENSION TO START SENDING IMMEDIATELY
+                if (typeof window !== 'undefined') {
+                    window.postMessage({
+                        type: 'LEAD_GENIUS_START_BATCH',
+                        payload: {
+                            count: res.data.successful,
+                            batchId: Date.now()
+                        }
+                    }, '*');
+                }
+
                 toast.success(`Successfully sent ${res.data.successful} of ${res.data.total} messages`);
 
                 // Wait a bit to show results before completing
