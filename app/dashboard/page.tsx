@@ -1,9 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { api } from "@/lib/api";
 import {
-  Database,
-  FileCheck,
   Rocket,
   MessageSquare,
   AlertCircle,
@@ -12,7 +12,11 @@ import {
   CloudLightning,
   CheckCircle2,
   MoreVertical,
-  Loader2
+  Loader2,
+  ChevronRight,
+  Plus,
+  Database,
+  FileCheck
 } from "lucide-react";
 import {
   BarChart,
@@ -35,6 +39,8 @@ export default function DashboardPage() {
   const { stats, isLoading: statsLoading, error: statsError } = useDashboardStats();
   const { activities, isLoading: activityLoading } = useDashboardActivity(10);
   const { chartData, isLoading: chartLoading } = useDashboardChart(7);
+
+  // Transform stats for display
 
   // Transform stats for display
   const displayStats = stats ? [

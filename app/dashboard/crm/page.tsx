@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
-import { Loader2, Plus, Search, Filter, Bell, Briefcase, Mail, Phone, MoreHorizontal, User, ExternalLink, Download, Upload, Linkedin, Send } from "lucide-react";
+import { Loader2, Plus, Search, Filter, Bell, Briefcase, Mail, Phone, MoreHorizontal, User, ExternalLink, Download, Upload, Linkedin, Send, List as ListIcon, LayoutGrid, Rocket, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import LinkedInMessaging from "@/components/linkedin/LinkedInMessaging";
 import BatchLinkedInMessaging from "@/components/linkedin/BatchLinkedInMessaging";
@@ -27,21 +27,26 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { KanbanBoard, Lead } from "@/components/crm/KanbanBoard";
 
-interface Lead {
+
+interface Campaign {
     id: string;
     name: string;
-    title?: string;
-    company?: string;
-    email?: string;
-    phone?: string;
-    linkedin_url?: string;
-    score: number;
     status: string;
-    source: string;
+    type: string;
+    leads_count: number;
+    contacted_count: number;
+    replied_count: number;
     created_at: string;
-    updated_at?: string;
-    enrichment_status?: string;
 }
 
 interface LeadsResponse {
@@ -63,6 +68,13 @@ export default function CRMPage() {
     const [stats, setStats] = useState<LeadStats | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+    // View Mode (List/Kanban)
+    const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
+
+    // Campaigns for Dashboard Header
+    const [latestCampaigns, setLatestCampaigns] = useState<Campaign[]>([]);
+    const [campaignsLoading, setCampaignsLoading] = useState(true);
 
     // Filters & Pagination State
     const [activeFilter, setActiveFilter] = useState("All"); // Maps to status
@@ -159,7 +171,25 @@ export default function CRMPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [page, activeFilter, searchTerm]);
+    }, [page, activeFilter, searchTerm, selectedLead]);
+
+    // Fetch Campaigns
+    useEffect(() => {
+        async function fetchCampaigns() {
+            try {
+                const res = await api.get<{ items: Campaign[] }>("/api/campaigns");
+                if (res.data?.items) {
+                    const sorted = res.data.items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                    setLatestCampaigns(sorted.slice(0, 3));
+                }
+            } catch (error) {
+                console.error("Failed to fetch campaigns", error);
+            } finally {
+                setCampaignsLoading(false);
+            }
+        }
+        fetchCampaigns();
+    }, []);
 
     // Debounce search
     useEffect(() => {
@@ -264,6 +294,16 @@ export default function CRMPage() {
     const interestedCount = stats?.by_status?.['interested'] || 0;
     const followUpCount = stats?.by_status?.['contacted'] || 0; // Assuming contacted maps to follow-up roughly
 
+    // Filtered leads for list/kanban view
+    const filteredLeads = leads.filter(lead => {
+        const matchesSearch = searchTerm ?
+            (lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.title?.toLowerCase().includes(searchTerm.toLowerCase())) : true;
+        const matchesFilter = activeFilter === "All" ? true : lead.status.toLowerCase() === activeFilter.toLowerCase();
+        return matchesSearch && matchesFilter;
+    });
+
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-muted-foreground transition-colors duration-300">
             {/* Top Bar */}
@@ -273,7 +313,25 @@ export default function CRMPage() {
                     <span>/</span>
                     <span className="text-foreground">CRM Pipeline</span>
                 </div>
-                <div className="flex gap-4">
+                <div className="flex gap-2">
+                    {/* View Toggle */}
+                    <div className="flex items-center bg-card border border-border rounded-lg p-1 mr-2">
+                        <button
+                            onClick={() => setViewMode('list')}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-blue-600/10 text-blue-500 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                            title="List View"
+                        >
+                            <ListIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                            onClick={() => setViewMode('kanban')}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'kanban' ? 'bg-blue-600/10 text-blue-500 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                            title="Kanban View"
+                        >
+                            <LayoutGrid className="h-4 w-4" />
+                        </button>
+                    </div>
+
                     <button className="relative p-2 text-muted-foreground hover:text-foreground">
                         <Bell className="h-5 w-5" />
                         <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 border border-background"></span>
@@ -383,6 +441,52 @@ export default function CRMPage() {
                     </div>
                 </div>
 
+                {/* Latest Campaigns (Moved from Dashboard) */}
+                <div className="mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Latest Campaigns</h3>
+                        <Link href="/dashboard/campaigns" className="text-xs font-medium text-blue-500 hover:text-blue-400 flex items-center gap-1">
+                            View All <ChevronRight className="h-3 w-3" />
+                        </Link>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {campaignsLoading ? (
+                            [1, 2, 3].map((i) => (
+                                <div key={i} className="h-24 rounded-lg border border-border bg-card/50 animate-pulse" />
+                            ))
+                        ) : latestCampaigns.length > 0 ? (
+                            latestCampaigns.map((campaign) => (
+                                <Link key={campaign.id} href={`/dashboard/campaigns/${campaign.id}/kanban`}>
+                                    <div className="group relative overflow-hidden rounded-lg border border-border bg-card p-4 transition-all hover:border-blue-500/50 hover:shadow-md hover:-translate-y-0.5">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <div className={`p-1.5 rounded-md ${campaign.type === 'linkedin' ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'}`}>
+                                                    <Rocket className="h-3.5 w-3.5" />
+                                                </div>
+                                                <h4 className="font-bold text-sm text-foreground truncate max-w-[120px]">{campaign.name}</h4>
+                                            </div>
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${campaign.status === 'active' || campaign.status === 'running' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                                                {campaign.status}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-2">
+                                            <span>{campaign.leads_count} Leads</span>
+                                            <span className="h-1 w-1 rounded-full bg-border"></span>
+                                            <span>{campaign.contacted_count} Contacted</span>
+                                            <span className="h-1 w-1 rounded-full bg-border"></span>
+                                            <span>{campaign.replied_count} Replied</span>
+                                        </div>
+                                    </div>
+                                </Link>
+                            ))
+                        ) : (
+                            <div className="col-span-3 text-center py-4 text-xs text-muted-foreground border border-dashed border-border rounded-lg">
+                                No campaigns found.
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 {/* Filters */}
                 <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2 scrollbar-none">
                     <TabButton label="All Leads" active={activeFilter === "All"} onClick={() => { setActiveFilter("All"); setPage(1); }} count={stats?.total} />
@@ -391,203 +495,222 @@ export default function CRMPage() {
                     <TabButton label="New" active={activeFilter === "new"} onClick={() => { setActiveFilter("new"); setPage(1); }} />
                 </div>
 
-                {/* Content Columns */}
-                <div className="grid grid-cols-12 gap-6 h-[calc(100vh-380px)]">
+                {/* Main Content Area */}
+                {viewMode === 'list' ? (
+                    <div key="list-view" className="grid grid-cols-12 gap-6 h-[calc(100vh-380px)]">
 
-                    {/* Left Column: List */}
-                    <div className="col-span-8 flex flex-col rounded-xl border border-border bg-card overflow-hidden h-full">
-                        {/* Search Bar */}
-                        <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-card sticky top-0 z-10">
-                            <div className="relative flex-1 max-w-md">
-                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                <Input
-                                    type="text"
-                                    placeholder="Search..."
-                                    value={searchTerm}
-                                    onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
-                                    className="pl-9 bg-muted/50 border-transparent focus:bg-background transition-colors"
-                                />
-                            </div>
-                            <Button variant="ghost" size="icon" className="ml-2">
-                                <Filter className="h-4 w-4" />
-                            </Button>
-                        </div>
-
-                        {/* Table Header */}
-                        <div className="grid grid-cols-12 gap-2 border-b border-border bg-muted/30 px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                            <div className="col-span-4">Lead Name</div>
-                            <div className="col-span-3">Company</div>
-                            <div className="col-span-1">Score</div>
-                            <div className="col-span-2">Status</div>
-                            <div className="col-span-2 text-right">Added</div>
-                        </div>
-
-                        {/* Table Rows (Scrollable) */}
-                        <div className="flex-1 overflow-y-auto divide-y divide-border">
-                            {isLoading && leads.length === 0 ? (
-                                <div className="flex h-full items-center justify-center">
-                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                                </div>
-                            ) : leads.length === 0 ? (
-                                <div className="flex h-full items-center justify-center text-muted-foreground flex-col gap-2">
-                                    <User className="h-8 w-8 opacity-20" />
-                                    No leads found matching your criteria.
-                                </div>
-                            ) : (
-                                leads.map((lead) => (
-                                    <LeadRow
-                                        key={lead.id}
-                                        lead={lead}
-                                        selected={selectedLead?.id === lead.id}
-                                        onClick={() => setSelectedLead(lead)}
+                        {/* Left Column: List */}
+                        <div className="col-span-8 flex flex-col rounded-xl border border-border bg-card overflow-hidden h-full">
+                            {/* Search Bar */}
+                            <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-card sticky top-0 z-10">
+                                <div className="relative flex-1 max-w-md">
+                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <Input
+                                        type="text"
+                                        placeholder="Search..."
+                                        value={searchTerm}
+                                        onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
+                                        className="pl-9 bg-muted/50 border-transparent focus:bg-background transition-colors"
                                     />
-                                ))
-                            )}
-                        </div>
+                                </div>
+                                <Button variant="ghost" size="icon" className="ml-2">
+                                    <Filter className="h-4 w-4" />
+                                </Button>
+                            </div>
 
-                        {/* Pagination */}
-                        <div className="flex items-center justify-between border-t border-border px-6 py-3 text-xs text-muted-foreground bg-card">
-                            <span>Page {page} of {totalPages}</span>
-                            <div className="flex gap-2">
-                                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Prev</Button>
-                                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</Button>
+                            {/* Table Header */}
+                            <div className="grid grid-cols-12 gap-2 border-b border-border bg-muted/30 px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                <div className="col-span-4">Lead Name</div>
+                                <div className="col-span-3">Company</div>
+                                <div className="col-span-1">Score</div>
+                                <div className="col-span-2">Status</div>
+                                <div className="col-span-2 text-right">Added</div>
+                            </div>
+
+                            {/* Table Rows (Scrollable) */}
+                            <div className="flex-1 overflow-y-auto divide-y divide-border">
+                                {isLoading && filteredLeads.length === 0 ? (
+                                    <div className="flex h-full items-center justify-center">
+                                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                    </div>
+                                ) : filteredLeads.length === 0 ? (
+                                    <div className="flex h-full items-center justify-center text-muted-foreground flex-col gap-2">
+                                        <User className="h-8 w-8 opacity-20" />
+                                        No leads found matching your criteria.
+                                    </div>
+                                ) : (
+                                    filteredLeads.map((lead) => (
+                                        <LeadRow
+                                            key={lead.id}
+                                            lead={lead}
+                                            selected={selectedLead?.id === lead.id}
+                                            onClick={() => setSelectedLead(lead)}
+                                        />
+                                    ))
+                                )}
+                            </div>
+
+                            {/* Pagination */}
+                            <div className="flex items-center justify-between border-t border-border px-6 py-3 text-xs text-muted-foreground bg-card">
+                                <span>Page {page} of {totalPages}</span>
+                                <div className="flex gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Prev</Button>
+                                    <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</Button>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    {/* Right Column: Details */}
-                    <div className="col-span-4 flex flex-col rounded-xl border border-border bg-card overflow-hidden h-full">
-                        {selectedLead ? (
-                            <div className="flex flex-col h-full">
-                                {/* Profile Header */}
-                                <div className="relative border-b border-border p-6 text-center bg-card">
-                                    <div className="absolute top-4 right-4 flex gap-2">
-                                        <Link href={`/dashboard/crm/${selectedLead.id}`}>
-                                            <Button variant="outline" size="sm" className="gap-2 text-xs h-8">
-                                                <ExternalLink className="h-3 w-3" /> View Lead
-                                            </Button>
-                                        </Link>
-                                    </div>
-
-                                    <div className={`mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white shadow-lg ${selectedLead.score >= 80 ? 'bg-blue-600 shadow-blue-500/20' : 'bg-slate-600'}`}>
-                                        {selectedLead.name.substring(0, 2).toUpperCase()}
-                                    </div>
-                                    <h2 className="text-xl font-bold text-foreground">{selectedLead.name}</h2>
-                                    <div className="text-sm text-muted-foreground mt-1">
-                                        {selectedLead.title}
-                                        {selectedLead.company && <span className="block font-medium text-blue-500">{selectedLead.company}</span>}
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className="mt-6 flex justify-center gap-3">
-                                        {selectedLead.email && (
-                                            <a href={`mailto:${selectedLead.email}`} className="p-2 rounded bg-muted hover:bg-accent text-foreground transition" title="Email">
-                                                <Mail className="h-4 w-4" />
-                                            </a>
-                                        )}
-                                        {selectedLead.phone && (
-                                            <a href={`tel:${selectedLead.phone}`} className="p-2 rounded bg-muted hover:bg-accent text-foreground transition" title="Call">
-                                                <Phone className="h-4 w-4" />
-                                            </a>
-                                        )}
-                                        {selectedLead.linkedin_url && (
-                                            <>
-                                                <a href={selectedLead.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded bg-muted hover:bg-accent text-[#0077b5] transition" title="LinkedIn">
-                                                    <Briefcase className="h-4 w-4" />
-                                                </a>
-                                                <button
-                                                    onClick={() => openLinkedInModal(selectedLead)}
-                                                    className="p-2 rounded bg-[#0077b5] hover:bg-[#006396] text-white transition"
-                                                    title="Send LinkedIn Message"
-                                                >
-                                                    <Send className="h-4 w-4" />
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
-
-                                    <div className="mt-4 flex items-center justify-center gap-2">
-                                        <Select
-                                            value={selectedLead.status}
-                                            onValueChange={(val) => handleStatusChange(selectedLead.id, val)}
-                                        >
-                                            <SelectTrigger className="w-[140px] h-8 text-xs bg-muted/50 border-none">
-                                                <SelectValue placeholder="Status" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="new">New</SelectItem>
-                                                <SelectItem value="open">Open</SelectItem>
-                                                <SelectItem value="interested">Interested</SelectItem>
-                                                <SelectItem value="contacted">Contacted</SelectItem>
-                                                <SelectItem value="qualified">Qualified</SelectItem>
-                                                <SelectItem value="closed">Closed</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-
-                                        {/* Quick Enrich Trigger (Hidden for now, rely on Full Page for detailed enrichment control or add small button if critical) */}
-                                    </div>
-                                </div>
-
-                                {/* Details Body */}
-                                <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                                    <div>
-                                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Lead Score Analysis</h4>
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="text-2xl font-bold text-foreground">{selectedLead.score}</div>
-                                            <div className="h-2 flex-1 bg-muted rounded-full overflow-hidden">
-                                                <div className={`h-full ${selectedLead.score >= 80 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${selectedLead.score}%` }}></div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Contact Info</h4>
-                                        <div className="space-y-2 text-sm">
-                                            <div className="grid grid-cols-3">
-                                                <span className="text-muted-foreground">Email:</span>
-                                                <span className="col-span-2 text-foreground truncate">{selectedLead.email || "-"}</span>
-                                            </div>
-                                            <div className="grid grid-cols-3">
-                                                <span className="text-muted-foreground">Phone:</span>
-                                                <span className="col-span-2 text-foreground truncate">{selectedLead.phone || "-"}</span>
-                                            </div>
-                                            <div className="grid grid-cols-3">
-                                                <span className="text-muted-foreground">Source:</span>
-                                                <span className="col-span-2 text-foreground truncate">{selectedLead.source}</span>
-                                            </div>
-                                            <div className="grid grid-cols-3">
-                                                <span className="text-muted-foreground">Enriched:</span>
-                                                <span className={`col-span-2 truncate capitalize ${!selectedLead.enrichment_status ? 'text-muted-foreground' : selectedLead.enrichment_status === 'enriched' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                                                    {selectedLead.enrichment_status || "Not started"}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-4">
-                                            <Link href={`/dashboard/crm/${selectedLead.id}`} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
-                                                View full details & enrichment status <ExternalLink className="h-3 w-3" />
+                        {/* Right Column: Details */}
+                        <div className="col-span-4 flex flex-col rounded-xl border border-border bg-card overflow-hidden h-full">
+                            {selectedLead ? (
+                                <div className="flex flex-col h-full">
+                                    {/* Profile Header */}
+                                    <div className="relative border-b border-border p-6 text-center bg-card">
+                                        <div className="absolute top-4 right-4 flex gap-2">
+                                            <Link href={`/dashboard/crm/${selectedLead.id}`}>
+                                                <Button variant="outline" size="sm" className="gap-2 text-xs h-8">
+                                                    <ExternalLink className="h-3 w-3" /> View Lead
+                                                </Button>
                                             </Link>
                                         </div>
+
+                                        <div className={`mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white shadow-lg ${selectedLead.score >= 80 ? 'bg-blue-600 shadow-blue-500/20' : 'bg-slate-600'}`}>
+                                            {selectedLead.name.substring(0, 2).toUpperCase()}
+                                        </div>
+                                        <h2 className="text-xl font-bold text-foreground">{selectedLead.name}</h2>
+                                        <div className="text-sm text-muted-foreground mt-1">
+                                            {selectedLead.title}
+                                            {selectedLead.company && <span className="block font-medium text-blue-500">{selectedLead.company}</span>}
+                                        </div>
+
+                                        {/* Action Buttons */}
+                                        <div className="mt-6 flex justify-center gap-3">
+                                            {selectedLead.email && (
+                                                <a href={`mailto:${selectedLead.email}`} className="p-2 rounded bg-muted hover:bg-accent text-foreground transition" title="Email">
+                                                    <Mail className="h-4 w-4" />
+                                                </a>
+                                            )}
+                                            {selectedLead.phone && (
+                                                <a href={`tel:${selectedLead.phone}`} className="p-2 rounded bg-muted hover:bg-accent text-foreground transition" title="Call">
+                                                    <Phone className="h-4 w-4" />
+                                                </a>
+                                            )}
+                                            {selectedLead.linkedin_url && (
+                                                <>
+                                                    <a href={selectedLead.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded bg-muted hover:bg-accent text-[#0077b5] transition" title="LinkedIn">
+                                                        <Briefcase className="h-4 w-4" />
+                                                    </a>
+                                                    <button
+                                                        onClick={() => openLinkedInModal(selectedLead)}
+                                                        className="p-2 rounded bg-[#0077b5] hover:bg-[#006396] text-white transition"
+                                                        title="Send LinkedIn Message"
+                                                    >
+                                                        <Send className="h-4 w-4" />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        <div className="mt-4 flex items-center justify-center gap-2">
+                                            <Select
+                                                value={selectedLead.status}
+                                                onValueChange={(val) => handleStatusChange(selectedLead.id, val)}
+                                            >
+                                                <SelectTrigger className="w-[140px] h-8 text-xs bg-muted/50 border-none">
+                                                    <SelectValue placeholder="Status" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="new">New</SelectItem>
+                                                    <SelectItem value="open">Open</SelectItem>
+                                                    <SelectItem value="interested">Interested</SelectItem>
+                                                    <SelectItem value="contacted">Contacted</SelectItem>
+                                                    <SelectItem value="qualified">Qualified</SelectItem>
+                                                    <SelectItem value="closed">Closed</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+
+                                            {/* Quick Enrich Trigger (Hidden for now, rely on Full Page for detailed enrichment control or add small button if critical) */}
+                                        </div>
                                     </div>
 
-                                    <div className="pt-6 border-t border-border">
-                                        <Button variant="destructive" size="sm" className="w-full" onClick={() => handleDeleteLead(selectedLead.id)}>
-                                            Delete Lead
-                                        </Button>
+                                    {/* Details Body */}
+                                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                        <div>
+                                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Lead Score Analysis</h4>
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <div className="text-2xl font-bold text-foreground">{selectedLead.score}</div>
+                                                <div className="h-2 flex-1 bg-muted rounded-full overflow-hidden">
+                                                    <div className={`h-full ${selectedLead.score >= 80 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${selectedLead.score}%` }}></div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Contact Info</h4>
+                                            <div className="space-y-2 text-sm">
+                                                <div className="grid grid-cols-3">
+                                                    <span className="text-muted-foreground">Email:</span>
+                                                    <span className="col-span-2 text-foreground truncate">{selectedLead.email || "-"}</span>
+                                                </div>
+                                                <div className="grid grid-cols-3">
+                                                    <span className="text-muted-foreground">Phone:</span>
+                                                    <span className="col-span-2 text-foreground truncate">{selectedLead.phone || "-"}</span>
+                                                </div>
+                                                <div className="grid grid-cols-3">
+                                                    <span className="text-muted-foreground">Source:</span>
+                                                    <span className="col-span-2 text-foreground truncate">{selectedLead.source}</span>
+                                                </div>
+                                                <div className="grid grid-cols-3">
+                                                    <span className="text-muted-foreground">Enriched:</span>
+                                                    <span className={`col-span-2 truncate capitalize ${!selectedLead.enrichment_status ? 'text-muted-foreground' : selectedLead.enrichment_status === 'enriched' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                                                        {selectedLead.enrichment_status || "Not started"}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-4">
+                                                <Link href={`/dashboard/crm/${selectedLead.id}`} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
+                                                    View full details & enrichment status <ExternalLink className="h-3 w-3" />
+                                                </Link>
+                                            </div>
+                                        </div>
+
+                                        <div className="pt-6 border-t border-border">
+                                            <Button variant="destructive" size="sm" className="w-full" onClick={() => handleDeleteLead(selectedLead.id)}>
+                                                Delete Lead
+                                            </Button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ) : (
-                            <div className="flex h-full flex-col items-center justify-center text-muted-foreground p-8 text-center">
-                                <div className="bg-muted rounded-full p-4 mb-4">
-                                    <User className="h-8 w-8 opacity-50" />
+                            ) : (
+                                <div className="flex h-full flex-col items-center justify-center text-muted-foreground p-8 text-center">
+                                    <div className="bg-muted rounded-full p-4 mb-4">
+                                        <User className="h-8 w-8 opacity-50" />
+                                    </div>
+                                    <h3 className="font-medium text-foreground mb-1">No Lead Selected</h3>
+                                    <p className="text-sm">Select a lead from the list to view details and manage their status.</p>
                                 </div>
-                                <h3 className="font-medium text-foreground mb-1">No Lead Selected</h3>
-                                <p className="text-sm">Select a lead from the list to view details and manage their status.</p>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div key="kanban-view" className="h-[calc(100vh-200px)] overflow-x-auto overflow-y-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <KanbanBoard
+                            leads={filteredLeads}
+                            onStatusChange={async (id, status) => {
+                                // Optimistic update
+                                setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+                                toast.success(`Moved to ${status}`);
+                                try {
+                                    await api.patch(`/api/leads/${id}`, { status });
+                                } catch (e) {
+                                    toast.error("Failed to update status");
+                                    fetchLeads();
+                                }
+                            }}
+                        />
+                    </div>
+                )}
 
             </div>
 
