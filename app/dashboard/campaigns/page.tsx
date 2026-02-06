@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -13,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Play, Pause, Trash2, MoreHorizontal, Loader2 } from "lucide-react";
+import { ApifyResultsViewer } from "./ApifyResults";
 
 interface Campaign {
     id: string;
@@ -43,6 +45,7 @@ function mapCampaignTypeToChannel(type: string): string {
 }
 
 export default function CampaignsPage() {
+    const router = useRouter();
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [stats, setStats] = useState<{
@@ -125,43 +128,8 @@ export default function CampaignsPage() {
         toast.info("Campaign creation coming soon!");
     };
 
-    const handleEditCampaign = async (campaignId: string) => {
-        // Fetch campaign details
-        const { data, error } = await api.get<Campaign>(`/api/campaigns/${campaignId}`);
-        if (!error && data) {
-            setEditingCampaign(data);
-            setEditFormData({ name: data.name, type: data.type });
-            setIsEditModalOpen(true);
-        }
-    };
-
-    const handleSaveEdit = async () => {
-        if (!editingCampaign) return;
-        const { error } = await api.patch(`/api/campaigns/${editingCampaign.id}`, editFormData);
-        if (!error) {
-            toast.success("Campaign updated!");
-            setIsEditModalOpen(false);
-            // Refresh campaigns
-            const res = await api.get<CampaignsResponse>("/api/campaigns");
-            if (res.data) setCampaigns(res.data.items || []);
-        } else {
-            toast.error("Failed to update campaign");
-        }
-    };
-
-    const [viewCampaign, setViewCampaign] = useState<Campaign | null>(null);
-    const [campaignRuns, setCampaignRuns] = useState<any[]>([]);
-
-    const handleViewDetails = async (campaign: Campaign) => {
-        setViewCampaign(campaign);
-        setCampaignRuns([]); // Reset previous
-        // Fetch runs
-        try {
-            const { data } = await api.get<any[]>(`/api/campaigns/${campaign.id}/runs`);
-            if (data) setCampaignRuns(data);
-        } catch (e) {
-            console.error("Failed to fetch runs", e);
-        }
+    const handleViewDetails = (campaign: Campaign) => {
+        router.push(`/dashboard/campaigns/${campaign.id}`);
     };
 
     return (
@@ -322,82 +290,8 @@ export default function CampaignsPage() {
                 </div>
 
             </div>
-
-            {/* Campaign Details Modal */}
-            {viewCampaign && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl">
-                        <div className="p-6">
-                            <div className="flex justify-between items-start mb-6">
-                                <div>
-                                    <h2 className="text-xl font-bold text-foreground">{viewCampaign.name}</h2>
-                                    <p className="text-sm text-muted-foreground">Campaign Details</p>
-                                </div>
-                                <button onClick={() => setViewCampaign(null)} className="text-muted-foreground hover:text-foreground">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
-                                </button>
-                            </div>
-
-                            <div className="space-y-6">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <InfoBox label="Status" value={viewCampaign.status} className="capitalize" />
-                                    <InfoBox label="Type" value={viewCampaign.type} className="capitalize" />
-                                    <InfoBox label="Leads Generated" value={String(viewCampaign.leads_count)} />
-                                    <InfoBox label="Created" value={new Date(viewCampaign.created_at).toLocaleString()} />
-                                </div>
-
-                                {viewCampaign.settings && (
-                                    <div className="rounded-lg border border-border bg-muted/30 p-4">
-                                        <h3 className="font-medium text-foreground mb-3 flex items-center gap-2">
-                                            <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                                            Extraction Configuration
-                                        </h3>
-                                        <div className="space-y-3 text-sm">
-                                            {Object.entries(viewCampaign.settings).map(([key, val]) => (
-                                                <div key={key} className="grid grid-cols-3 gap-2 border-b border-border/50 pb-2 last:border-0 last:pb-0">
-                                                    <span className="text-muted-foreground font-medium col-span-1 capitalize">{key.replace(/_/g, ' ')}</span>
-                                                    <span className="text-foreground col-span-2 break-all font-mono text-xs opacity-90">
-                                                        {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Latest Run Results */}
-                                {campaignRuns.length > 0 && (
-                                    <div className="rounded-lg border border-border bg-muted/10 p-4">
-                                        <ApifyResultsViewer data={campaignRuns[0].result_data} />
-                                    </div>
-                                )}
-
-                                <div className="flex justify-end pt-4 border-t border-border">
-                                    <button
-                                        onClick={() => setViewCampaign(null)}
-                                        className="px-4 py-2 rounded-lg border border-border bg-background text-sm font-medium hover:bg-accent hover:text-accent-foreground transition"
-                                    >
-                                        Close
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
-}
-
-import { ApifyResultsViewer } from "./ApifyResults";
-
-function InfoBox({ label, value, className = "" }: any) {
-    return (
-        <div className="p-3 rounded-lg bg-secondary/50 border border-border/50">
-            <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">{label}</div>
-            <div className={`text-base text-foreground font-medium ${className}`}>{value}</div>
-        </div>
-    )
 }
 
 /* --- Components --- */

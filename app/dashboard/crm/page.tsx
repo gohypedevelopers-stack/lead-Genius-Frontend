@@ -3,8 +3,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
-import { Loader2, Plus, Search, Filter, Bell, Briefcase, Mail, Phone, MoreHorizontal, User, ExternalLink, Download, Upload } from "lucide-react";
+import { Loader2, Plus, Search, Filter, Bell, Briefcase, Mail, Phone, MoreHorizontal, User, ExternalLink, Download, Upload, Linkedin, Send } from "lucide-react";
 import { toast } from "sonner";
+import LinkedInMessaging from "@/components/linkedin/LinkedInMessaging";
+import BatchLinkedInMessaging from "@/components/linkedin/BatchLinkedInMessaging";
+import LinkedInStatusBadge from "@/components/linkedin/LinkedInStatusBadge";
 import {
     Dialog,
     DialogContent,
@@ -77,6 +80,46 @@ export default function CRMPage() {
         linkedin_url: "",
         phone: ""
     });
+
+    // LinkedIn Messaging State
+    const [linkedInModalOpen, setLinkedInModalOpen] = useState(false);
+    const [linkedInModalLead, setLinkedInModalLead] = useState<Lead | null>(null);
+    const [batchLinkedInModalOpen, setBatchLinkedInModalOpen] = useState(false);
+    const [selectedLeadsForBatch, setSelectedLeadsForBatch] = useState<Set<string>>(new Set());
+
+    // Helper: Select/Deselect lead for batch
+    const toggleLeadSelection = (leadId: string) => {
+        setSelectedLeadsForBatch(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(leadId)) {
+                newSet.delete(leadId);
+            } else {
+                newSet.add(leadId);
+            }
+            return newSet;
+        });
+    };
+
+    const openLinkedInModal = (lead: Lead) => {
+        if (!lead.linkedin_url) {
+            toast.error("This lead doesn't have a LinkedIn URL");
+            return;
+        }
+        setLinkedInModalLead(lead);
+        setLinkedInModalOpen(true);
+    };
+
+    const openBatchLinkedInModal = () => {
+        const selectedLeadObjects = leads.filter(l => selectedLeadsForBatch.has(l.id));
+        const leadsWithLinkedIn = selectedLeadObjects.filter(l => l.linkedin_url);
+
+        if (leadsWithLinkedIn.length === 0) {
+            toast.error("Selected leads don't have LinkedIn URLs");
+            return;
+        }
+
+        setBatchLinkedInModalOpen(true);
+    };
 
     const fetchLeads = useCallback(async () => {
         setIsLoading(true);
@@ -235,6 +278,18 @@ export default function CRMPage() {
                         <Bell className="h-5 w-5" />
                         <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 border border-background"></span>
                     </button>
+
+                    {/* Batch LinkedIn Message Button */}
+                    {selectedLeadsForBatch.size > 0 && (
+                        <Button
+                            onClick={openBatchLinkedInModal}
+                            variant="outline"
+                            className="flex items-center gap-2 border-[#0077b5] text-[#0077b5] hover:bg-[#0077b5] hover:text-white"
+                        >
+                            <Linkedin className="h-4 w-4" />
+                            LinkedIn Message ({selectedLeadsForBatch.size})
+                        </Button>
+                    )}
 
                     {/* Export Button */}
                     <Button onClick={handleExportLeads} variant="outline" className="flex items-center gap-2">
@@ -436,9 +491,18 @@ export default function CRMPage() {
                                             </a>
                                         )}
                                         {selectedLead.linkedin_url && (
-                                            <a href={selectedLead.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded bg-muted hover:bg-accent text-[#0077b5] transition" title="LinkedIn">
-                                                <Briefcase className="h-4 w-4" />
-                                            </a>
+                                            <>
+                                                <a href={selectedLead.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-2 rounded bg-muted hover:bg-accent text-[#0077b5] transition" title="LinkedIn">
+                                                    <Briefcase className="h-4 w-4" />
+                                                </a>
+                                                <button
+                                                    onClick={() => openLinkedInModal(selectedLead)}
+                                                    className="p-2 rounded bg-[#0077b5] hover:bg-[#006396] text-white transition"
+                                                    title="Send LinkedIn Message"
+                                                >
+                                                    <Send className="h-4 w-4" />
+                                                </button>
+                                            </>
                                         )}
                                     </div>
 
@@ -526,6 +590,41 @@ export default function CRMPage() {
                 </div>
 
             </div>
+
+            {/* LinkedIn Messaging Modal */}
+            <Dialog open={linkedInModalOpen} onOpenChange={setLinkedInModalOpen}>
+                <DialogContent className="max-w-2xl p-0">
+                    {linkedInModalLead && (
+                        <LinkedInMessaging
+                            leadId={linkedInModalLead.id}
+                            leadName={linkedInModalLead.name}
+                            linkedinUrl={linkedInModalLead.linkedin_url!}
+                            onMessageSent={() => {
+                                fetchLeads();
+                                setLinkedInModalOpen(false);
+                            }}
+                            onClose={() => setLinkedInModalOpen(false)}
+                        />
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Batch LinkedIn Messaging Modal */}
+            <Dialog open={batchLinkedInModalOpen} onOpenChange={setBatchLinkedInModalOpen}>
+                <DialogContent className="max-w-4xl p-0 max-h-[90vh]">
+                    <BatchLinkedInMessaging
+                        leads={leads.filter(l => selectedLeadsForBatch.has(l.id))}
+                        onComplete={(results) => {
+                            setBatchLinkedInModalOpen(false);
+                            setSelectedLeadsForBatch(new Set());
+                            fetchLeads();
+                        }}
+                        onCancel={() => {
+                            setBatchLinkedInModalOpen(false);
+                        }}
+                    />
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
